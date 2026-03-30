@@ -18,6 +18,8 @@ import {
   updateInspectionStep,
 } from "./db";
 import { invokeLLM } from "./_core/llm";
+import { transcribeAudio } from "./_core/voiceTranscription";
+import { storagePut } from "./storage";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -444,6 +446,34 @@ Keep answers concise (2-3 sentences), technical, and safety-focused.`;
       .mutation(async ({ input }) => {
         await acknowledgeAlert(input.alertId);
         return { success: true };
+      }),
+  }),
+
+  // ── Voice Transcription ────────────────────────────────────────────────────
+  voice: router({
+    transcribe: publicProcedure
+      .input(z.object({
+        audioBase64: z.string(),
+        mimeType: z.string().default("audio/webm"),
+      }))
+      .mutation(async ({ input }) => {
+        // Decode base64 audio and upload to S3
+        const audioBuffer = Buffer.from(input.audioBase64, "base64");
+        const fileKey = `voice-recordings/inspection-${Date.now()}-${Math.random().toString(36).slice(2)}.webm`;
+        const { url: audioUrl } = await storagePut(fileKey, audioBuffer, input.mimeType);
+
+        // Transcribe via Whisper
+        const result = await transcribeAudio({
+          audioUrl,
+          language: "en",
+          prompt: "Aircraft pre-flight inspection reading. Technical aviation terminology, PSI, QT, degrees Celsius.",
+        });
+
+        if ("error" in result) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error });
+        }
+
+        return { text: result.text, language: result.language };
       }),
   }),
 

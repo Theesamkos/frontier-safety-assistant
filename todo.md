@@ -60,3 +60,15 @@
 - [x] Vitest: alerts acknowledge test
 - [x] Vitest: auth router test
 - [x] All 11 tests passing, zero TypeScript errors
+
+## UI Redesign + Voice Control (Round 2)
+- [ ] Implement Bricolage Grotesque + JetBrains Mono typography system
+- [ ] Redesign global CSS with cream/white/off-white + red/green/amber design tokens
+- [ ] Redesign landing page (Home.tsx) — bold hero, aircraft selector cards
+- [ ] Redesign Inspection page (Inspection.tsx) — radical layout, ghost number, spec cards, top-bar alert
+- [ ] Redesign Report page (Report.tsx) — clean document-style FAA report
+- [ ] CRITICAL FIX: Replace Web Speech API (network error) with MediaRecorder + Whisper backend transcription
+- [ ] Spacebar PTT: hold to record via MediaRecorder, release to POST audio to /api/transcribe, auto-fill input and submit
+- [ ] Visual recording indicator (waveform animation + red pulsing border on input)
+- [ ] Add visual voice recording indicator (pulsing ring, waveform, status overlay)
+- [ ] Ensure full mobile/tablet responsive layout

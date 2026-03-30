@@ -1,619 +1,711 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 import {
-  Mic, MicOff, Send, Shield, AlertTriangle, CheckCircle2,
-  XCircle, Clock, Activity, ChevronRight, FileText, Home,
-  Loader2, AlertCircle, Info, ChevronDown, ChevronUp, History
+  Mic, MicOff, ChevronRight, AlertTriangle, CheckCircle2,
+  FileText, Home, Clock, Shield, Send
 } from "lucide-react";
 
-// Typewriter hook for streaming AI response effect
-function useTypewriter(text: string, speed = 18) {
-  const [displayed, setDisplayed] = useState("");
-  const [done, setDone] = useState(false);
+// ── Voice Hook ─────────────────────────────────────────────────────────────
+function useVoiceControl(
+  onTranscript: (text: string) => void,
+  onTranscribing: (v: boolean) => void
+) {
+  const [isListening, setIsListening] = useState(false);
+  const [isSupported, setIsSupported] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const spaceHeldRef = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const transcribeMutation = trpc.voice.transcribe.useMutation({
+    onSuccess: (data) => {
+      if (data.text?.trim()) {
+        onTranscript(data.text.trim());
+        toast.success(`Heard: "${data.text.trim().slice(0, 60)}${data.text.trim().length > 60 ? '…' : ''}"`, { duration: 2500 });
+      } else {
+        toast.warning("No speech detected. Hold SPACE longer and speak clearly.");
+      }
+      onTranscribing(false);
+    },
+    onError: (err) => {
+      toast.error(`Transcription failed: ${err.message}`);
+      onTranscribing(false);
+    },
+  });
+
   useEffect(() => {
-    setDisplayed("");
-    setDone(false);
-    if (!text) return;
-    let i = 0;
-    const interval = setInterval(() => {
-      i++;
-      setDisplayed(text.slice(0, i));
-      if (i >= text.length) { clearInterval(interval); setDone(true); }
-    }, speed);
-    return () => clearInterval(interval);
-  }, [text, speed]);
-  return { displayed, done };
+    setIsSupported(!!navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function");
+  }, []);
+
+  const startListening = useCallback(async () => {
+    if (isListening) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.start(100);
+      mediaRecorderRef.current = recorder;
+      setIsListening(true);
+    } catch (err: any) {
+      toast.error(err.name === "NotAllowedError"
+        ? "Microphone permission denied. Please allow mic access in browser settings."
+        : `Mic error: ${err.message}`);
+    }
+  }, [isListening]);
+
+  const stopListening = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || !isListening) return;
+    const mimeType = recorder.mimeType;
+    recorder.onstop = async () => {
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      if (blob.size < 500) {
+        toast.warning("Recording too short. Hold SPACE longer.");
+        onTranscribing(false);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = (reader.result as string).split(",")[1];
+        onTranscribing(true);
+        transcribeMutation.mutate({ audioBase64: base64, mimeType: mimeType.split(";")[0] });
+      };
+      reader.readAsDataURL(blob);
+    };
+    recorder.stop();
+    mediaRecorderRef.current = null;
+    setIsListening(false);
+  }, [isListening, transcribeMutation, onTranscribing]);
+
+  // Spacebar PTT — only fires when no text input is focused
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+      if (!spaceHeldRef.current) { spaceHeldRef.current = true; startListening(); }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || !spaceHeldRef.current) return;
+      spaceHeldRef.current = false;
+      stopListening();
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, [startListening, stopListening]);
+
+  return { isListening, isSupported, isTranscribing: transcribeMutation.isPending, startListening, stopListening };
 }
 
-// Streaming AI message bubble
-function StreamingAIMessage({ content, isInSpec }: { content: string; isInSpec?: boolean }) {
-  const { displayed, done } = useTypewriter(content, 16);
-  return (
-    <div className="flex items-start gap-3 max-w-2xl">
-      <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <Shield className="w-4 h-4 text-primary" />
-      </div>
-      <div className="glass-card px-4 py-3 rounded-2xl rounded-tl-sm">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-xs font-medium text-primary">Safety AI</span>
-          {isInSpec === true && <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-400/15 text-emerald-400 border border-emerald-400/25">✓ In Spec</span>}
-          {isInSpec === false && <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-400/15 text-red-400 border border-red-400/25">⚠ Out of Spec</span>}
-        </div>
-        <p className="text-sm text-foreground leading-relaxed">
-          {displayed}
-          {!done && <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-typing-cursor" />}
-        </p>
-      </div>
-    </div>
-  );
-}
+// ── Sample inputs per step ─────────────────────────────────────────────────
+const SAMPLES: Record<number, string> = {
+  1: "Logbook reviewed, last maintenance 3 days ago, all entries current",
+  2: "Airworthiness certificate valid, registration N737DL confirmed",
+  3: "Nose section clear, no visible damage, radome intact",
+  4: "Nose tire pressure 185 PSI, gear strut compressed normally",
+  5: "Left engine inlet clear, fan blades inspected, no FOD",
+  6: "Left main gear tire pressure 205 PSI, no visible wear",
+  7: "Left wing leading edge clear, fuel cap secure, no leaks",
+  8: "Left aileron and flaps move freely, no damage",
+  9: "Total fuel 82%, left 41% right 41%, balanced",
+  10: "No fuel leaks detected, fuel appears clean",
+  11: "Tail section intact, elevator and rudder move freely",
+  12: "APU exhaust clear, all access panels secured",
+  13: "Right wing clear, control surfaces operational",
+  14: "Right main gear tire pressure 198 PSI, brakes appear good",
+  15: "Right engine inlet clear, fan blades normal",
+  16: "Hydraulic pressure 3050 PSI, fluid level normal",
+  17: "Engine 1 oil level 14 QT, within normal range",
+  18: "Engine 2 oil level 13 QT, within normal range",
+  19: "Brake temperature 45 C, wear indicators green",
+  20: "Pre-flight inspection complete, aircraft ready for service",
+};
 
-type StepStatus = "pending" | "in_progress" | "passed" | "failed" | "skipped";
-type AlertSeverity = "critical" | "warning" | "info";
-
-interface Message {
+// ── Message types ──────────────────────────────────────────────────────────
+interface ChatMessage {
   id: string;
   role: "worker" | "ai" | "system";
   content: string;
-  timestamp: Date;
-  isInSpec?: boolean;
-  stepNumber?: number;
+  ts: string;
+  isAlert?: boolean;
+  streaming?: boolean;
 }
 
-const SAMPLE_INPUTS: Record<number, string[]> = {
-  1: ["Logbook reviewed, last maintenance 3 days ago, all entries current"],
-  2: ["Airworthiness certificate valid, registration N737DL confirmed"],
-  3: ["Nose section clear, no visible damage, radome intact"],
-  4: ["Nose tire pressure 185 PSI, gear strut compressed normally"],
-  5: ["Left engine inlet clear, fan blades inspected, no FOD"],
-  6: ["Left main gear tire pressure 205 PSI, no visible wear"],
-  7: ["Left wing leading edge clear, fuel cap secure, no leaks"],
-  8: ["Left aileron and flaps move freely, no damage"],
-  9: ["Total fuel 82%, left 41% right 41%, balanced"],
-  10: ["No fuel leaks detected, fuel appears clean, no contamination"],
-  11: ["Tail section intact, elevator and rudder move freely"],
-  12: ["APU exhaust clear, all access panels secured"],
-  13: ["Right wing clear, control surfaces operational"],
-  14: ["Right main gear tire pressure 198 PSI, brakes appear good"],
-  15: ["Right engine inlet clear, fan blades normal"],
-  16: ["Hydraulic pressure 3050 PSI, fluid level normal"],
-  17: ["Engine 1 oil level 14 QT, within normal range"],
-  18: ["Engine 2 oil level 13 QT, within normal range"],
-  19: ["Brake temperature 45 C, wear indicators green"],
-  20: ["Pre-flight inspection complete, aircraft ready for service"],
-};
-
+// ── Main ───────────────────────────────────────────────────────────────────
 export default function Inspection() {
-  const params = useParams<{ sessionId: string }>();
-  const sessionId = params.sessionId;
+  const { sessionId } = useParams<{ sessionId: string }>();
   const [, navigate] = useLocation();
 
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentStep, setCurrentStep] = useState(1);
-  const [isListening, setIsListening] = useState(false);
-  const [showAlerts, setShowAlerts] = useState(true);
-  const [showChecklist, setShowChecklist] = useState(true);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [generatingReport, setGeneratingReport] = useState(false);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: state, refetch } = trpc.inspection.getState.useQuery(
-    { sessionId },
-    { refetchInterval: 3000 }
+    { sessionId: sessionId! },
+    { enabled: !!sessionId, refetchInterval: 4000 }
   );
 
-  const submitStep = trpc.inspection.submitStep.useMutation({
-    onSuccess: (data) => {
-      const aiMsg: Message = {
-        id: `ai-${Date.now()}`,
-        role: "ai",
-        content: data.aiResponse,
-        timestamp: new Date(),
-        isInSpec: data.isInSpec,
-      };
-      setMessages(prev => [...prev, aiMsg]);
-
-      if (!data.isInSpec && data.newAlerts.length > 0) {
-        data.newAlerts.forEach(alert => {
-          if (alert.severity === "critical") {
-            toast.error(alert.title, { description: alert.message.slice(0, 80) + "..." });
-          } else {
-            toast.warning(alert.title, { description: alert.message.slice(0, 80) + "..." });
-          }
-        });
-      }
-
-      if (data.nextStepNumber) {
-        setCurrentStep(data.nextStepNumber);
-      }
-
-      if (data.isComplete) {
-        const sysMsg: Message = {
-          id: `sys-${Date.now()}`,
-          role: "system",
-          content: "✅ Pre-flight inspection complete. All steps have been recorded. You may now generate the FAA compliance report.",
-          timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, sysMsg]);
-      }
-
-      refetch();
-      setIsSubmitting(false);
-      setInput("");
-    },
-    onError: () => {
-      toast.error("Failed to submit step. Please try again.");
-      setIsSubmitting(false);
-    },
-  });
-
+  const submitStep = trpc.inspection.submitStep.useMutation();
   const generateReport = trpc.report.generate.useMutation({
-    onSuccess: () => {
-      navigate(`/report/${sessionId}`);
-    },
-    onError: () => {
-      toast.error("Failed to generate report.");
-      setGeneratingReport(false);
-    },
+    onSuccess: () => navigate(`/report/${sessionId}`),
+    onError: () => toast.error("Failed to generate report"),
   });
-
-  // Timer
-  useEffect(() => {
-    timerRef.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, []);
-
-  // Welcome message
-  useEffect(() => {
-    if (state && messages.length === 0) {
-      const aircraft = state.aircraft;
-      setMessages([{
-        id: "welcome",
-        role: "ai",
-        content: `Pre-flight inspection initiated for ${aircraft?.manufacturer} ${aircraft?.model} (${aircraft?.tailNumber}). I'll guide you through all ${state.inspection.totalSteps} steps. Begin with Step 1: Verify aircraft logbook and maintenance records. Speak or type your findings.`,
-        timestamp: new Date(),
-      }]);
-    }
-  }, [state, messages.length]);
-
-  // Auto-scroll
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSubmit = useCallback(() => {
-    if (!input.trim() || isSubmitting) return;
-    const workerMsg: Message = {
-      id: `worker-${Date.now()}`,
-      role: "worker",
-      content: input.trim(),
-      timestamp: new Date(),
-      stepNumber: currentStep,
-    };
-    setMessages(prev => [...prev, workerMsg]);
-    setIsSubmitting(true);
-    submitStep.mutate({ sessionId, stepNumber: currentStep, workerInput: input.trim() });
-  }, [input, isSubmitting, currentStep, sessionId, submitStep]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  const useSampleInput = () => {
-    const samples = SAMPLE_INPUTS[currentStep];
-    if (samples) setInput(samples[0]);
-    inputRef.current?.focus();
-  };
-
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, "0")}`;
-  };
+  const acknowledgeAlert = trpc.alerts.acknowledge.useMutation({ onSuccess: () => refetch() });
 
   const inspection = state?.inspection;
   const steps = state?.steps ?? [];
   const alerts = state?.alerts ?? [];
-  const unackedAlerts = alerts.filter(a => !a.acknowledged);
-  const ackedAlerts = alerts.filter(a => a.acknowledged);
-  const criticalAlerts = unackedAlerts.filter(a => a.severity === "critical");
-  const completionPct = inspection ? Math.round(((inspection.completedSteps ?? 0) / (inspection.totalSteps ?? 20)) * 100) : 0;
-  const isComplete = inspection?.status === "completed";
-  const [alertTab, setAlertTab] = useState<"active" | "history">("active");
+  const unacked = alerts.filter((a: any) => !a.acknowledged);
+  const acked = alerts.filter((a: any) => a.acknowledged);
+  const critical = unacked.filter((a: any) => a.severity === "critical");
+  const completed = steps.filter((s: any) => s.status === "passed" || s.status === "failed").length;
+  const passed = steps.filter((s: any) => s.status === "passed").length;
+  const failed = steps.filter((s: any) => s.status === "failed").length;
+  const total = inspection?.totalSteps ?? 20;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-  const acknowledgeAlert = trpc.alerts.acknowledge.useMutation({ onSuccess: () => refetch() });
+  // Timer
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}m ${s % 60}s`;
+
+  // Auto-scroll
+  useEffect(() => {
+    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+  }, [messages]);
+
+  // Welcome
+  useEffect(() => {
+    if (state && messages.length === 0) {
+      const a = state.aircraft;
+      setMessages([{
+        id: "welcome",
+        role: "ai",
+        content: `Pre-flight inspection initiated for ${a?.manufacturer ?? ""} ${a?.model ?? ""} (${a?.tailNumber ?? ""}). I'll guide you through all ${total} steps. Begin with Step 1: Verify aircraft logbook and maintenance records.`,
+        ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }]);
+    }
+  }, [state]);
+
+  // Voice
+  const handleTranscript = useCallback((text: string) => {
+    setInput(text);
+    // toast is shown by the voice hook itself
+    inputRef.current?.focus();
+  }, []);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const { isListening, isSupported, startListening, stopListening } = useVoiceControl(handleTranscript, setIsTranscribing);
+
+  // Submit
+  const handleSubmit = useCallback(async () => {
+    if (!input.trim() || isSubmitting || !sessionId) return;
+    const text = input.trim();
+    setInput("");
+    setIsSubmitting(true);
+
+    const workerMsg: ChatMessage = {
+      id: `w-${Date.now()}`,
+      role: "worker",
+      content: text,
+      ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+    setMessages(prev => [...prev, workerMsg]);
+
+    // Streaming placeholder
+    const placeholderId = `ai-${Date.now()}`;
+    setMessages(prev => [...prev, { id: placeholderId, role: "ai", content: "", ts: "", streaming: true }]);
+
+    try {
+      const result = await submitStep.mutateAsync({ sessionId, stepNumber: currentStep, workerInput: text });
+      const aiText = result.aiResponse ?? "Reading recorded.";
+      const isAlert = result.isInSpec === false;
+
+      if (isAlert && result.newAlerts?.length) {
+        result.newAlerts.forEach((al: any) => {
+          al.severity === "critical"
+            ? toast.error(al.title, { description: al.message?.slice(0, 80) })
+            : toast.warning(al.title, { description: al.message?.slice(0, 80) });
+        });
+      }
+
+      // Replace placeholder with typewriter
+      setMessages(prev => prev.map(m => m.id === placeholderId
+        ? { ...m, content: "", streaming: false, isAlert, ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }
+        : m
+      ));
+
+      let i = 0;
+      const iv = setInterval(() => {
+        i++;
+        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, content: aiText.slice(0, i) } : m));
+        if (i >= aiText.length) clearInterval(iv);
+      }, 16);
+
+      if (result.nextStepNumber) setCurrentStep(result.nextStepNumber);
+      if (result.isComplete) {
+        setMessages(prev => [...prev, {
+          id: `sys-${Date.now()}`, role: "system",
+          content: "✅ Inspection complete. Generate your FAA compliance report.",
+          ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        }]);
+      }
+      await refetch();
+    } catch {
+      setMessages(prev => prev.map(m => m.id === placeholderId
+        ? { ...m, content: "Unable to process reading. Please try again.", streaming: false, ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }
+        : m
+      ));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [input, isSubmitting, sessionId, currentStep, submitStep, refetch]);
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+  };
+
+  // Group steps by category
+  const byCategory = steps.reduce<Record<string, any[]>>((acc, s: any) => {
+    if (!acc[s.category]) acc[s.category] = [];
+    acc[s.category].push(s);
+    return acc;
+  }, {});
+
+  const stepNum = String(currentStep).padStart(2, "0");
+  const currentStepData = steps.find((s: any) => s.stepNumber === currentStep) ?? steps[0];
+
+  if (!state) {
+    return (
+      <div className="h-screen flex items-center justify-center" style={{ background: "oklch(97% 0.006 80)", fontFamily: "'Bricolage Grotesque', sans-serif" }}>
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-[oklch(12%_0.015_250)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-sm font-mono" style={{ color: "oklch(50% 0.012 250)" }}>Loading inspection…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Top bar */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-card/50 backdrop-blur-sm sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/")} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
-            <Home className="w-4 h-4" />
-          </button>
-          <div className="w-px h-4 bg-border" />
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-sm text-foreground hidden sm:block">
-              {state?.aircraft?.manufacturer} {state?.aircraft?.model}
-            </span>
-            <span className="font-mono text-xs text-muted-foreground">{state?.aircraft?.tailNumber}</span>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "oklch(97% 0.006 80)", fontFamily: "'Bricolage Grotesque', 'Inter', sans-serif" }}>
+
+      {/* ══ TOP BAR ══ */}
+      <header className="flex items-stretch h-[52px] bg-white border-b border-[oklch(88%_0.01_80)] flex-shrink-0">
+        {/* Brand */}
+        <div className="flex items-center gap-2.5 px-5 border-r border-[oklch(88%_0.01_80)]">
+          <div className="w-7 h-7 bg-[oklch(12%_0.015_250)] rounded-md flex items-center justify-center">
+            <span className="text-white text-[10px] font-black">SF</span>
           </div>
+          <span className="text-[13px] font-black tracking-tight text-[oklch(12%_0.015_250)] hidden sm:block">SafetyFirst</span>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Timer */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="w-3.5 h-3.5" />
-            <span className="font-mono">{formatTime(elapsedSeconds)}</span>
-          </div>
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-1.5 px-4 border-r border-[oklch(88%_0.01_80)] text-[12px]" style={{ color: "oklch(50% 0.012 250)" }}>
+          <button onClick={() => navigate("/")} className="hover:text-[oklch(12%_0.015_250)] transition-colors flex items-center gap-1">
+            <Home size={11} /> Home
+          </button>
+          <ChevronRight size={11} />
+          <span className="font-mono">{state.aircraft?.tailNumber}</span>
+          <ChevronRight size={11} />
+          <span className="font-semibold text-[oklch(12%_0.015_250)]">Pre-Flight</span>
+        </div>
 
-          {/* Alert badge */}
-          {criticalAlerts.length > 0 && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-destructive/15 border border-destructive/30 text-xs text-red-400 animate-flash">
-              <AlertTriangle className="w-3 h-3" />
-              {criticalAlerts.length} Critical
-            </div>
-          )}
-
-          {/* Progress */}
-          <div className="flex items-center gap-2">
-            <div className="w-24 h-1.5 rounded-full bg-secondary overflow-hidden hidden sm:block">
-              <div
-                className="h-full rounded-full bg-primary transition-all duration-500"
-                style={{ width: `${completionPct}%` }}
-              />
-            </div>
-            <span className="text-xs font-mono text-muted-foreground">{completionPct}%</span>
-          </div>
-
-          {/* Generate Report */}
-          {isComplete && (
+        {/* Critical alert */}
+        {critical.length > 0 ? (
+          <div className="flex items-center gap-3 px-4 bg-[oklch(52%_0.24_25)] flex-1 animate-slide-down">
+            <span className="inline-flex items-center gap-1 bg-white/20 border border-white/30 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white">
+              ⚠ Critical
+            </span>
+            <span className="text-[13px] font-semibold text-white truncate">{critical[0].parameter}</span>
+            {critical[0].actualValue && (
+              <span className="font-mono text-[11px] text-white/70 hidden md:block">
+                {critical[0].actualValue} · Spec: {critical[0].expectedRange}
+              </span>
+            )}
             <button
-              onClick={() => { setGeneratingReport(true); generateReport.mutate({ sessionId }); }}
-              disabled={generatingReport}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity"
+              onClick={() => acknowledgeAlert.mutate({ alertId: critical[0].id })}
+              className="ml-auto text-[11px] text-white/70 border border-white/25 rounded px-3 py-1 hover:bg-white/15 transition-colors font-mono whitespace-nowrap"
             >
-              {generatingReport ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
-              Generate Report
+              Acknowledge →
             </button>
-          )}
+          </div>
+        ) : <div className="flex-1" />}
+
+        {/* Right actions */}
+        <div className="flex items-center gap-2 px-4 border-l border-[oklch(88%_0.01_80)]">
+          <span className="font-mono text-[11px] bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded px-2.5 py-1 text-[oklch(50%_0.012_250)]">
+            <span className="text-[oklch(12%_0.015_250)] font-bold">{stepNum}</span> / {String(total).padStart(2, "0")}
+          </span>
+          <button
+            onClick={() => { if (!generateReport.isPending) generateReport.mutate({ sessionId: sessionId! }); }}
+            disabled={generateReport.isPending}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-[oklch(52%_0.24_25)] rounded-lg text-[12px] font-bold text-white hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+          >
+            <FileText size={13} />
+            {generateReport.isPending ? "Generating…" : "FAA Report"}
+          </button>
         </div>
       </header>
 
+      {/* ══ 3-COLUMN BODY ══ */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar — Checklist */}
-        <aside className={`${showChecklist ? "w-72" : "w-12"} border-r border-border/60 flex flex-col bg-card/30 transition-all duration-300 hidden lg:flex`}>
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
-            {showChecklist && <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Checklist</span>}
-            <button onClick={() => setShowChecklist(!showChecklist)} className="p-1 rounded hover:bg-secondary text-muted-foreground ml-auto">
-              {showChecklist ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5 rotate-90" />}
-            </button>
+
+        {/* ── LEFT: CHECKLIST ── */}
+        <aside className="w-[200px] flex-shrink-0 bg-white border-r border-[oklch(88%_0.01_80)] flex flex-col overflow-hidden">
+          {/* Progress */}
+          <div className="px-4 py-4 border-b border-[oklch(88%_0.01_80)]">
+            <p className="label-caps mb-2" style={{ color: "oklch(50% 0.012 250)" }}>Checklist</p>
+            <div className="flex items-baseline gap-1">
+              <span className="text-[38px] font-black leading-none tracking-tight text-[oklch(12%_0.015_250)]">{completed}</span>
+              <span className="text-[16px] font-medium" style={{ color: "oklch(68% 0.01 250)" }}>/ {total}</span>
+            </div>
+            <div className="h-[3px] bg-[oklch(88%_0.01_80)] rounded-full mt-2.5 overflow-hidden">
+              <div className="h-full bg-[oklch(12%_0.015_250)] rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+            </div>
           </div>
-          {showChecklist && (
-            <div className="flex-1 overflow-y-auto py-2">
-              {steps.map((step) => (
-                <div
-                  key={step.id}
-                  className={`flex items-start gap-2.5 px-3 py-2 mx-2 rounded-lg mb-0.5 transition-all ${
-                    step.stepNumber === currentStep && !isComplete
-                      ? "bg-primary/10 border border-primary/25"
-                      : "hover:bg-secondary/30"
-                  }`}
-                >
-                  <div className="mt-0.5 flex-shrink-0">
-                    {step.status === "passed" ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : step.status === "failed" ? (
-                      <XCircle className="w-3.5 h-3.5 text-red-400" />
-                    ) : step.stepNumber === currentStep && !isComplete ? (
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-primary pulse-ring" />
-                    ) : (
-                      <div className="w-3.5 h-3.5 rounded-full border border-border" />
-                    )}
+
+          {/* Steps */}
+          <div className="flex-1 overflow-y-auto">
+            {Object.entries(byCategory).map(([cat, catSteps]) => (
+              <div key={cat}>
+                <div className="px-4 py-2 text-[9px] font-bold uppercase tracking-[0.12em] bg-white border-b border-[oklch(91%_0.008_80)] sticky top-0" style={{ color: "oklch(68% 0.01 250)" }}>
+                  {cat}
+                </div>
+                {catSteps.map((step: any) => {
+                  const isActive = step.stepNumber === currentStep;
+                  const done = step.status === "passed" || step.status === "failed";
+                  return (
+                    <button
+                      key={step.id}
+                      onClick={() => setCurrentStep(step.stepNumber)}
+                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-left border-b border-[oklch(91%_0.008_80)] transition-colors ${
+                        isActive ? "bg-[oklch(12%_0.015_250)]" : "hover:bg-[oklch(94%_0.008_80)]"
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-[3px] flex-shrink-0 flex items-center justify-center text-[8px] border ${
+                        step.status === "passed" ? "bg-[oklch(55%_0.2_145)] border-[oklch(55%_0.2_145)] text-white" :
+                        step.status === "failed" ? "bg-[oklch(52%_0.24_25)] border-[oklch(52%_0.24_25)] text-white" :
+                        isActive ? "bg-white border-white" : "border-[oklch(82%_0.012_80)]"
+                      }`}>
+                        {step.status === "passed" && "✓"}
+                        {step.status === "failed" && "✗"}
+                      </div>
+                      <span className={`text-[11px] flex-1 leading-tight ${
+                        isActive ? "text-white font-semibold" : done ? "text-[oklch(50%_0.012_250)]" : "text-[oklch(30%_0.015_250)]"
+                      }`}>
+                        {step.stepName}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        {/* ── CENTER: WORKSPACE ── */}
+        <main className="flex-1 flex flex-col overflow-hidden bg-[oklch(97%_0.006_80)]">
+
+          {/* Step hero */}
+          <div className="bg-white border-b border-[oklch(88%_0.01_80)] px-8 pt-6 pb-5 flex-shrink-0 relative overflow-hidden">
+            <div className="ghost-number">{stepNum}</div>
+            <div className="flex items-center gap-2 mb-2 relative z-10">
+              <div className={`w-2 h-2 rounded-full ${
+                currentStepData?.status === "in_progress" ? "bg-[oklch(52%_0.24_25)] animate-pulse-dot" : "bg-[oklch(55%_0.2_145)]"
+              }`} />
+              <span className="label-caps text-[oklch(52%_0.24_25)]">
+                Step {stepNum} · {currentStepData?.category ?? ""}
+              </span>
+            </div>
+            <h1 className="display-md text-[oklch(12%_0.015_250)] relative z-10 max-w-lg">
+              {currentStepData?.stepName ?? "Loading…"}
+            </h1>
+          </div>
+
+          {/* Spec alert strip */}
+          {unacked.length > 0 && (
+            <div className="flex border-b border-[oklch(88%_0.01_80)] flex-shrink-0 overflow-x-auto">
+              {unacked.slice(0, 3).map((al: any) => (
+                <div key={al.id} className={`flex-1 min-w-[160px] px-5 py-3 border-r border-[oklch(88%_0.01_80)] last:border-r-0 ${
+                  al.severity === "critical" ? "spec-card-critical" :
+                  al.severity === "warning" ? "spec-card-warning" : "spec-card-info"
+                }`}>
+                  <div className={`label-caps mb-1 ${
+                    al.severity === "critical" ? "text-[oklch(52%_0.24_25)]" :
+                    al.severity === "warning" ? "text-[oklch(68%_0.17_65)]" : "text-[oklch(55%_0.2_250)]"
+                  }`}>
+                    {al.severity === "critical" ? "⚠ Critical" : al.severity === "warning" ? "⚡ Warning" : "ℹ Info"}
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-xs text-muted-foreground/60 font-mono">{step.stepNumber.toString().padStart(2, "0")}</div>
-                    <div className={`text-xs leading-tight ${
-                      step.stepNumber === currentStep && !isComplete ? "text-foreground font-medium" :
-                      step.status === "passed" ? "text-muted-foreground line-through" :
-                      "text-muted-foreground"
+                  <div className="text-[11px] mb-1" style={{ color: "oklch(50% 0.012 250)" }}>{al.parameter}</div>
+                  {al.actualValue && (
+                    <div className={`font-mono text-[24px] font-bold leading-none ${
+                      al.severity === "critical" ? "text-[oklch(52%_0.24_25)]" : "text-[oklch(68%_0.17_65)]"
                     }`}>
-                      {step.stepName}
+                      {al.actualValue}
                     </div>
-                  </div>
+                  )}
+                  {al.expectedRange && (
+                    <div className="font-mono text-[10px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>
+                      SPEC {al.expectedRange}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
-        </aside>
 
-        {/* Main chat area */}
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            {messages.map((msg, idx) => (
-              <div key={msg.id} className={`flex ${msg.role === "worker" ? "justify-end" : "justify-start"} animate-slide-in-up`}>
-                {msg.role === "ai" && (
-                  // Use streaming typewriter for the most recent AI message only
-                  idx === messages.filter(m => m.role !== "worker").length + messages.filter(m => m.role === "worker").length - 1 && idx === messages.length - 1
-                    ? <StreamingAIMessage content={msg.content} isInSpec={msg.isInSpec} />
-                    : <div className="flex items-start gap-3 max-w-2xl">
-                        <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <Shield className="w-4 h-4 text-primary" />
-                        </div>
-                        <div className="glass-card px-4 py-3 rounded-2xl rounded-tl-sm">
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="text-xs font-medium text-primary">Safety AI</span>
-                            {msg.isInSpec === true && <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-400/15 text-emerald-400 border border-emerald-400/25">✓ In Spec</span>}
-                            {msg.isInSpec === false && <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-400/15 text-red-400 border border-red-400/25">⚠ Out of Spec</span>}
-                          </div>
-                          <p className="text-sm text-foreground leading-relaxed">{msg.content}</p>
-                          <span className="text-xs text-muted-foreground/50 mt-1 block">{msg.timestamp.toLocaleTimeString()}</span>
-                        </div>
-                      </div>
+          {/* Input bar */}
+          <div className="bg-white border-b border-[oklch(88%_0.01_80)] px-8 py-4 flex-shrink-0">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="label-caps" style={{ color: "oklch(50% 0.012 250)" }}>Voice Command</span>
+              <span className="font-mono text-[10px] bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded px-2 py-0.5" style={{ color: "oklch(50% 0.012 250)" }}>
+                Step {stepNum}
+              </span>
+              <button
+                onClick={() => { setInput(SAMPLES[currentStep] ?? ""); inputRef.current?.focus(); }}
+                className="font-mono text-[10px] bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded px-2 py-0.5 hover:bg-[oklch(88%_0.01_80)] transition-colors"
+                style={{ color: "oklch(50% 0.012 250)" }}
+              >
+                Use sample ↗
+              </button>
+              {isSupported && (
+                <span className="ml-auto font-mono text-[10px]" style={{ color: "oklch(50% 0.012 250)" }}>
+                  {isTranscribing ? (
+                    <span className="flex items-center gap-1.5 text-[oklch(45%_0.18_250)]">
+                      <div className="w-3 h-3 border-2 border-[oklch(45%_0.18_250/0.3)] border-t-[oklch(45%_0.18_250)] rounded-full animate-spin" />
+                      Transcribing…
+                    </span>
+                  ) : isListening ? (
+                    <span className="flex items-center gap-1.5 text-[oklch(52%_0.24_25)]">
+                      <span className="voice-waveform">
+                        <span /><span /><span /><span /><span />
+                      </span>
+                      Recording… release SPACE
+                    </span>
+                  ) : "Hold SPACE to speak"}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2.5">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder={`e.g. "${SAMPLES[currentStep] ?? "Enter your reading…"}"`}
+                className={`flex-1 bg-[oklch(97%_0.006_80)] border-[1.5px] border-[oklch(88%_0.01_80)] rounded-[10px] px-4 py-3 text-[14px] font-medium text-[oklch(12%_0.015_250)] placeholder:text-[oklch(68%_0.01_250)] outline-none transition-all ${
+                  isListening ? "voice-listening" : "focus:border-[oklch(12%_0.015_250)] focus:shadow-[0_0_0_3px_oklch(12%_0.015_250/0.07)]"
+                }`}
+              />
+              {isSupported && (
+                <button
+                  onMouseDown={startListening}
+                  onMouseUp={stopListening}
+                  onTouchStart={startListening}
+                  onTouchEnd={stopListening}
+                  className={`w-12 h-12 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-all ${
+                    isTranscribing
+                      ? "bg-[oklch(45%_0.18_250)] text-white"
+                      : isListening
+                      ? "bg-[oklch(52%_0.24_25)] text-white shadow-[0_0_0_4px_oklch(52%_0.24_25/0.2)] animate-pulse"
+                      : "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(50%_0.012_250)] hover:bg-[oklch(88%_0.01_80)]"
+                  }`}
+                  title="Hold to speak (or hold SPACE)"
+                  disabled={isTranscribing}
+                >
+                  {isTranscribing ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : isListening ? <Mic size={18} /> : <MicOff size={18} />}
+                </button>
+              )}
+              <button
+                onClick={handleSubmit}
+                disabled={!input.trim() || isSubmitting}
+                className="flex items-center gap-2 px-5 py-3 bg-[oklch(12%_0.015_250)] text-white rounded-[10px] text-[13px] font-bold hover:opacity-90 disabled:opacity-40 transition-all whitespace-nowrap"
+              >
+                {isSubmitting ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <><Send size={14} /> Submit <span className="font-mono text-[10px] bg-white/15 px-1.5 py-0.5 rounded hidden sm:inline">↵</span></>
                 )}
-                {msg.role === "worker" && (
-                  <div className="flex items-start gap-3 max-w-2xl">
-                    <div className="bg-primary/15 border border-primary/25 px-4 py-3 rounded-2xl rounded-tr-sm">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-xs font-medium text-muted-foreground">You</span>
-                        {msg.stepNumber && <span className="text-xs font-mono text-muted-foreground/50">Step {msg.stepNumber}</span>}
-                      </div>
-                      <p className="text-sm text-foreground">{msg.content}</p>
-                      <span className="text-xs text-muted-foreground/50 mt-1 block">{msg.timestamp.toLocaleTimeString()}</span>
-                    </div>
-                    <div className="w-8 h-8 rounded-xl bg-secondary border border-border flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Mic className="w-4 h-4 text-muted-foreground" />
-                    </div>
+              </button>
+            </div>
+          </div>
+
+          {/* AI Thread */}
+          <div ref={threadRef} className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-4">
+            {messages.length === 0 && (
+              <div className="flex items-center justify-center h-full text-center">
+                <div>
+                  <div className="w-12 h-12 bg-[oklch(12%_0.015_250)] rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <Shield size={20} className="text-white" />
                   </div>
-                )}
-                {msg.role === "system" && (
-                  <div className="w-full flex justify-center">
-                    <div className="px-4 py-2 rounded-xl bg-emerald-400/10 border border-emerald-400/25 text-emerald-400 text-sm text-center max-w-lg">
-                      {msg.content}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            {isSubmitting && (
-              <div className="flex justify-start animate-slide-in-up">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center">
-                    <Shield className="w-4 h-4 text-primary" />
-                  </div>
-                  <div className="glass-card px-4 py-3 rounded-2xl rounded-tl-sm">
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                      <span className="text-sm text-muted-foreground">Analyzing reading...</span>
-                    </div>
-                  </div>
+                  <p className="text-[13px] font-semibold text-[oklch(12%_0.015_250)]">Ready for Step {stepNum}</p>
+                  <p className="text-[12px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>Type or hold SPACE to speak your reading</p>
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Current step indicator */}
-          {!isComplete && (
-            <div className="px-4 py-2 border-t border-border/40 bg-card/30">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <div className="w-2 h-2 rounded-full bg-primary pulse-ring" />
-                <span className="font-mono text-primary">Step {currentStep}/{inspection?.totalSteps ?? 20}</span>
-                <ChevronRight className="w-3 h-3" />
-                <span className="text-foreground/80 truncate">
-                  {steps.find(s => s.stepNumber === currentStep)?.stepName ?? "Loading..."}
-                </span>
-                <button
-                  onClick={useSampleInput}
-                  className="ml-auto text-xs text-primary/70 hover:text-primary underline underline-offset-2 flex-shrink-0"
-                >
-                  Use sample input
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Voice input */}
-          {!isComplete && (
-            <div className="p-4 border-t border-border/60 bg-card/50">
-              <div className="voice-input flex items-end gap-3 p-3">
-                <button
-                  onClick={() => setIsListening(!isListening)}
-                  className={`p-2.5 rounded-xl flex-shrink-0 transition-all ${
-                    isListening
-                      ? "bg-red-500/20 border border-red-500/40 text-red-400 pulse-ring"
-                      : "bg-secondary border border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </button>
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Speak or type your inspection finding... (Enter to submit)"
-                  rows={2}
-                  className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none leading-relaxed"
-                />
-                <button
-                  onClick={handleSubmit}
-                  disabled={!input.trim() || isSubmitting}
-                  className="p-2.5 rounded-xl bg-primary text-primary-foreground flex-shrink-0 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all glow-blue"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground/40 mt-1.5 px-1">Press Enter to submit · Shift+Enter for new line</p>
-            </div>
-          )}
-        </main>
-
-        {/* Right sidebar — Metrics + Alerts */}
-        <aside className="w-72 border-l border-border/60 flex flex-col bg-card/30 hidden xl:flex">
-          {/* Metrics */}
-          <div className="p-4 border-b border-border/40">
-            <div className="flex items-center gap-2 mb-4">
-              <Activity className="w-4 h-4 text-primary" />
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Live Metrics</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="metric-card text-center">
-                <div className="text-2xl font-bold text-primary">{completionPct}%</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Complete</div>
-              </div>
-              <div className="metric-card text-center">
-                <div className="text-2xl font-bold text-emerald-400">{inspection?.safetyChecksPassed ?? 0}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Passed</div>
-              </div>
-              <div className="metric-card text-center">
-                <div className="text-2xl font-bold text-red-400">{inspection?.safetyChecksFailed ?? 0}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Failed</div>
-              </div>
-              <div className="metric-card text-center">
-                <div className="text-2xl font-bold text-amber-400">{unackedAlerts.length}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Alerts</div>
-              </div>
-            </div>
-
-            {/* Progress ring */}
-            <div className="flex justify-center mt-4">
-              <div className="relative w-20 h-20">
-                <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
-                  <circle cx="40" cy="40" r="32" fill="none" stroke="oklch(0.22 0.02 250)" strokeWidth="6" />
-                  <circle
-                    cx="40" cy="40" r="32" fill="none"
-                    stroke="oklch(0.65 0.22 250)"
-                    strokeWidth="6"
-                    strokeLinecap="round"
-                    strokeDasharray={`${2 * Math.PI * 32}`}
-                    strokeDashoffset={`${2 * Math.PI * 32 * (1 - completionPct / 100)}`}
-                    className="transition-all duration-500"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-lg font-bold text-foreground">{inspection?.completedSteps ?? 0}</span>
-                  <span className="text-xs text-muted-foreground">/{inspection?.totalSteps ?? 20}</span>
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex gap-3 items-start animate-slide-in-up ${msg.role === "worker" ? "flex-row-reverse" : ""}`}>
+                {msg.role !== "system" && (
+                  <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-[10px] font-black ${
+                    msg.role === "ai" ? "bg-[oklch(12%_0.015_250)] text-white" : "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(30%_0.015_250)]"
+                  }`}>
+                    {msg.role === "ai" ? "AI" : "ME"}
+                  </div>
+                )}
+                <div className={`max-w-[520px] ${msg.role === "system" ? "w-full" : ""}`}>
+                  {msg.role === "system" ? (
+                    <div className="w-full py-2.5 px-4 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.25)] rounded-xl text-[12px] font-semibold text-[oklch(55%_0.2_145)] text-center">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <>
+                      <div className={`px-4 py-3 rounded-xl text-[13px] leading-relaxed ${
+                        msg.role === "worker"
+                          ? "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(30%_0.015_250)] font-mono text-[12px]"
+                          : msg.isAlert
+                          ? "bg-[oklch(97%_0.02_25)] border-[1.5px] border-[oklch(52%_0.24_25/0.25)] text-[oklch(12%_0.015_250)]"
+                          : "bg-white border border-[oklch(88%_0.01_80)] text-[oklch(12%_0.015_250)]"
+                      }`}>
+                        {msg.streaming ? (
+                          <div className="flex gap-1.5 items-center py-1">
+                            <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                            <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                            <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                          </div>
+                        ) : (
+                          <>
+                            {msg.content}
+                            {msg.role === "ai" && !msg.streaming && <span className="ai-cursor" />}
+                          </>
+                        )}
+                      </div>
+                      <div className={`text-[10px] font-mono mt-1.5 ${msg.role === "worker" ? "text-right" : ""}`} style={{ color: "oklch(68% 0.01 250)" }}>
+                        {msg.ts}{msg.role === "ai" && " · AI guidance"}{msg.isAlert && " · ⚠ Safety alert"}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
+            ))}
+          </div>
+        </main>
 
-            {/* Time saved estimate */}
-            <div className="mt-3 p-3 rounded-xl bg-emerald-400/8 border border-emerald-400/20 text-center">
-              <div className="text-lg font-bold text-emerald-400">
-                ~{Math.max(0, Math.round(((inspection?.safetyChecksPassed ?? 0) * 2.5)))} min
-              </div>
-              <div className="text-xs text-muted-foreground">Estimated time saved</div>
+        {/* ── RIGHT PANEL ── */}
+        <aside className="w-[300px] flex-shrink-0 bg-white border-l border-[oklch(88%_0.01_80)] flex flex-col overflow-hidden">
+          {/* Aircraft ID */}
+          <div className="px-5 py-4 border-b border-[oklch(88%_0.01_80)] flex-shrink-0">
+            <div className="text-[42px] font-black leading-none tracking-[-0.05em] text-[oklch(12%_0.015_250)]">
+              {state.aircraft?.tailNumber ?? "N/A"}
             </div>
+            <div className="text-[12px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>
+              {state.aircraft?.manufacturer} {state.aircraft?.model}
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              {[
+                { k: "Flight", v: "DL 2847" },
+                { k: "Route", v: "ATL → ORD" },
+                { k: "ETD", v: "16:45 CDT" },
+                { k: "Inspector", v: state.inspection?.inspectorName ?? "S. MOECKEL" },
+              ].map(({ k, v }) => (
+                <div key={k}>
+                  <div className="label-caps mb-0.5" style={{ color: "oklch(68% 0.01 250)" }}>{k}</div>
+                  <div className="font-mono text-[12px] font-semibold text-[oklch(12%_0.015_250)]">{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Stats row */}
+          <div className="flex border-b border-[oklch(88%_0.01_80)] flex-shrink-0">
+            {[
+              { n: `${pct}%`, l: "Done", c: "text-[oklch(68%_0.17_65)]" },
+              { n: passed, l: "Passed", c: "text-[oklch(55%_0.2_145)]" },
+              { n: failed, l: "Alerts", c: "text-[oklch(52%_0.24_25)]" },
+              { n: fmt(elapsed), l: "Time", c: "text-[oklch(12%_0.015_250)]" },
+            ].map(({ n, l, c }) => (
+              <div key={l} className="flex-1 py-3 text-center border-r border-[oklch(88%_0.01_80)] last:border-r-0">
+                <div className={`text-[20px] font-black leading-none tracking-tight ${c}`}>{n}</div>
+                <div className="label-caps mt-1" style={{ color: "oklch(68% 0.01 250)" }}>{l}</div>
+              </div>
+            ))}
           </div>
 
           {/* Alerts */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Tabs */}
-            <div className="flex items-center border-b border-border/40">
-              <button
-                onClick={() => setAlertTab("active")}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-                  alertTab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <AlertTriangle className="w-3 h-3" />
-                Active
-                {unackedAlerts.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-400 text-xs">{unackedAlerts.length}</span>
-                )}
-              </button>
-              <button
-                onClick={() => setAlertTab("history")}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-                  alertTab === "history" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <History className="w-3 h-3" />
-                History
-                {ackedAlerts.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground text-xs">{ackedAlerts.length}</span>
-                )}
-              </button>
-            </div>
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+            <p className="label-caps" style={{ color: "oklch(50% 0.012 250)" }}>Active Alerts</p>
+            {unacked.length === 0 ? (
+              <div className="flex items-center gap-2 py-3 px-3 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.2)] rounded-xl">
+                <CheckCircle2 size={14} className="text-[oklch(55%_0.2_145)]" />
+                <span className="text-[12px] text-[oklch(55%_0.2_145)] font-semibold">All systems nominal</span>
+              </div>
+            ) : (
+              unacked.map((al: any) => (
+                <div key={al.id} className="rounded-xl overflow-hidden border border-[oklch(88%_0.01_80)]">
+                  <div className={`px-3.5 py-2.5 flex items-center gap-2 text-[11px] font-bold text-white ${
+                    al.severity === "critical" ? "bg-[oklch(52%_0.24_25)]" :
+                    al.severity === "warning" ? "bg-[oklch(68%_0.17_65)]" : "bg-[oklch(55%_0.2_250)]"
+                  }`}>
+                    <AlertTriangle size={12} />
+                    {al.severity.toUpperCase()} — {al.parameter}
+                  </div>
+                  <div className="px-3.5 py-2.5 bg-white text-[11px] leading-relaxed" style={{ color: "oklch(30% 0.015 250)" }}>
+                    {al.message}
+                    {al.actualValue && (
+                      <div className={`font-mono text-[12px] font-semibold mt-1.5 ${
+                        al.severity === "critical" ? "text-[oklch(52%_0.24_25)]" : "text-[oklch(68%_0.17_65)]"
+                      }`}>
+                        Reading: {al.actualValue} · Spec: {al.expectedRange}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => acknowledgeAlert.mutate({ alertId: al.id })}
+                      className="mt-2 text-[10px] font-mono underline hover:text-[oklch(12%_0.015_250)] transition-colors"
+                      style={{ color: "oklch(50% 0.012 250)" }}
+                    >
+                      Acknowledge
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {alertTab === "active" ? (
-                unackedAlerts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-24 text-center">
-                    <CheckCircle2 className="w-6 h-6 text-emerald-400 mb-2" />
-                    <p className="text-xs text-muted-foreground">No active alerts</p>
-                  </div>
-                ) : (
-                  unackedAlerts.map((alert) => (
-                    <div key={alert.id} className={`rounded-xl p-3 ${
-                      alert.severity === "critical" ? "alert-critical glow-critical" :
-                      alert.severity === "warning" ? "alert-warning glow-amber" : "alert-info"
-                    } animate-slide-in-up`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-1.5">
-                          {alert.severity === "critical" ? <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> :
-                           alert.severity === "warning" ? <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> :
-                           <Info className="w-3.5 h-3.5 flex-shrink-0" />}
-                          <span className="text-xs font-semibold">{alert.title}</span>
-                        </div>
-                        <button
-                          onClick={() => acknowledgeAlert.mutate({ alertId: alert.id })}
-                          className="text-xs opacity-60 hover:opacity-100 flex-shrink-0"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      {alert.actualValue && (
-                        <div className="mt-1.5 text-xs opacity-80">
-                          <span className="font-mono">{alert.actualValue}</span>
-                          <span className="mx-1 opacity-50">vs</span>
-                          <span className="font-mono opacity-70">{alert.expectedRange}</span>
-                        </div>
-                      )}
-                      <p className="text-xs opacity-70 mt-1 leading-relaxed line-clamp-2">{alert.message}</p>
-                    </div>
-                  ))
-                )
-              ) : (
-                ackedAlerts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-24 text-center">
-                    <History className="w-6 h-6 text-muted-foreground mb-2" />
-                    <p className="text-xs text-muted-foreground">No resolved alerts yet</p>
-                  </div>
-                ) : (
-                  ackedAlerts.map((alert) => (
-                    <div key={alert.id} className="rounded-xl p-3 bg-secondary/20 border border-border/40 opacity-70">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                        <span className="text-xs font-semibold text-muted-foreground">{alert.title}</span>
-                        <span className={`ml-auto text-xs px-1.5 py-0.5 rounded-full ${
-                          alert.severity === "critical" ? "bg-red-400/10 text-red-400" :
-                          alert.severity === "warning" ? "bg-amber-400/10 text-amber-400" : "bg-blue-400/10 text-blue-400"
-                        }`}>{alert.severity}</span>
-                      </div>
-                      {alert.actualValue && (
-                        <div className="text-xs text-muted-foreground/60 font-mono">
-                          {alert.actualValue} vs {alert.expectedRange}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )
-              )}
-            </div>
+          {/* Predicted next */}
+          <div className="px-4 py-3.5 border-t border-[oklch(88%_0.01_80)] flex-shrink-0">
+            <p className="label-caps mb-3" style={{ color: "oklch(50% 0.012 250)" }}>Up Next</p>
+            {steps.slice(
+              steps.findIndex((s: any) => s.stepNumber === currentStep) + 1,
+              steps.findIndex((s: any) => s.stepNumber === currentStep) + 4
+            ).map((step: any, i: number) => (
+              <div key={step.id} className="flex gap-2.5 py-2 border-b border-[oklch(91%_0.008_80)] last:border-b-0 text-[11px]" style={{ color: "oklch(30% 0.015 250)" }}>
+                <span className="font-mono text-[10px] font-semibold w-5 flex-shrink-0 pt-0.5" style={{ color: "oklch(68% 0.01 250)" }}>
+                  {String(currentStep + 1 + i).padStart(2, "0")}
+                </span>
+                <span>{step.stepName}</span>
+              </div>
+            ))}
           </div>
         </aside>
       </div>
