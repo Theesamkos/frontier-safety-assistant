@@ -72,3 +72,9 @@
 - [ ] Visual recording indicator (waveform animation + red pulsing border on input)
 - [ ] Add visual voice recording indicator (pulsing ring, waveform, status overlay)
 - [ ] Ensure full mobile/tablet responsive layout
+
+## Critical UX Fixes (Demo Polish)
+- [ ] Fix chat bubble overlap — ME bubbles floating over AI responses (layout/z-index issue)
+- [ ] Remove blinking cursors from all chat messages (typewriter effect leaving cursor artifact)
+- [ ] Auto-submit after voice transcription — no Enter key needed, send immediately on transcribe success
+- [ ] Add Text-to-Speech (Web Speech API SpeechSynthesis) — AI reads back every response aloud after it arrives

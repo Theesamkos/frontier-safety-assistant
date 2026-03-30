@@ -7,6 +7,34 @@ import {
   FileText, Home, Clock, Shield, Send
 } from "lucide-react";
 
+// ── TTS Hook ──────────────────────────────────────────────────────────────
+function useTTS() {
+  const speak = useCallback((text: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    // Strip markdown bold/asterisks and clean up for speech
+    const clean = text
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .slice(0, 500); // keep it concise for demo
+    const utt = new SpeechSynthesisUtterance(clean);
+    utt.rate = 1.05;
+    utt.pitch = 1.0;
+    utt.volume = 1.0;
+    // Prefer a clear English voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => v.lang === 'en-US' && v.name.includes('Google')) ||
+      voices.find(v => v.lang === 'en-US') ||
+      voices.find(v => v.lang.startsWith('en'));
+    if (preferred) utt.voice = preferred;
+    window.speechSynthesis.speak(utt);
+  }, []);
+  const stop = useCallback(() => window.speechSynthesis?.cancel(), []);
+  return { speak, stop };
+}
+
 // ── Voice Hook ─────────────────────────────────────────────────────────────
 function useVoiceControl(
   onTranscript: (text: string) => void,
@@ -88,17 +116,16 @@ function useVoiceControl(
     setIsListening(false);
   }, [isListening, transcribeMutation, onTranscribing]);
 
-  // Spacebar PTT — only fires when no text input is focused
+  // Spacebar PTT — always fires (no text input in voice-only mode)
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.code !== "Space" || e.repeat) return;
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
-      e.preventDefault();
+      e.preventDefault(); // prevent page scroll
       if (!spaceHeldRef.current) { spaceHeldRef.current = true; startListening(); }
     };
     const up = (e: KeyboardEvent) => {
       if (e.code !== "Space" || !spaceHeldRef.current) return;
+      e.preventDefault();
       spaceHeldRef.current = false;
       stopListening();
     };
@@ -207,78 +234,97 @@ export default function Inspection() {
     }
   }, [state]);
 
-  // Voice
+  // TTS
+  const { speak, stop: stopTTS } = useTTS();
+
+  // Voice — auto-submit on transcript
   const handleTranscript = useCallback((text: string) => {
-    setInput(text);
-    // toast is shown by the voice hook itself
-    inputRef.current?.focus();
-  }, []);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const { isListening, isSupported, startListening, stopListening } = useVoiceControl(handleTranscript, setIsTranscribing);
-
-  // Submit
-  const handleSubmit = useCallback(async () => {
-    if (!input.trim() || isSubmitting || !sessionId) return;
-    const text = input.trim();
-    setInput("");
-    setIsSubmitting(true);
-
+    // Directly submit without putting text in the input box
+    if (!text.trim() || !sessionId) return;
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const workerMsg: ChatMessage = {
       id: `w-${Date.now()}`,
-      role: "worker",
-      content: text,
-      ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      role: 'worker',
+      content: text.trim(),
+      ts,
     };
     setMessages(prev => [...prev, workerMsg]);
+    // Trigger submit with the transcribed text directly
+    setVoiceSubmitText(text.trim());
+  }, [sessionId]);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceSubmitText, setVoiceSubmitText] = useState<string | null>(null);
+  const { isListening, isSupported, startListening, stopListening } = useVoiceControl(handleTranscript, setIsTranscribing);
+
+  // Core submit — accepts text directly (for voice) or reads from input state (for keyboard)
+  const submitText = useCallback(async (text: string) => {
+    if (!text.trim() || isSubmitting || !sessionId) return;
+    setIsSubmitting(true);
 
     // Streaming placeholder
     const placeholderId = `ai-${Date.now()}`;
-    setMessages(prev => [...prev, { id: placeholderId, role: "ai", content: "", ts: "", streaming: true }]);
+    setMessages(prev => [...prev, { id: placeholderId, role: 'ai', content: '', ts: '', streaming: true }]);
 
     try {
       const result = await submitStep.mutateAsync({ sessionId, stepNumber: currentStep, workerInput: text });
-      const aiText = result.aiResponse ?? "Reading recorded.";
+      const aiText = result.aiResponse ?? 'Reading recorded.';
       const isAlert = result.isInSpec === false;
+      const finalTs = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
       if (isAlert && result.newAlerts?.length) {
         result.newAlerts.forEach((al: any) => {
-          al.severity === "critical"
+          al.severity === 'critical'
             ? toast.error(al.title, { description: al.message?.slice(0, 80) })
             : toast.warning(al.title, { description: al.message?.slice(0, 80) });
         });
       }
 
-      // Replace placeholder with typewriter
+      // Replace placeholder — show full text immediately, no typewriter cursor artifact
       setMessages(prev => prev.map(m => m.id === placeholderId
-        ? { ...m, content: "", streaming: false, isAlert, ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }
+        ? { ...m, content: aiText, streaming: false, isAlert, ts: finalTs }
         : m
       ));
 
-      let i = 0;
-      const iv = setInterval(() => {
-        i++;
-        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, content: aiText.slice(0, i) } : m));
-        if (i >= aiText.length) clearInterval(iv);
-      }, 16);
+      // TTS: read the AI response aloud
+      speak(aiText);
 
       if (result.nextStepNumber) setCurrentStep(result.nextStepNumber);
       if (result.isComplete) {
+        const completeMsg = 'Inspection complete. All steps finished. Generate your FAA compliance report now.';
         setMessages(prev => [...prev, {
-          id: `sys-${Date.now()}`, role: "system",
-          content: "✅ Inspection complete. Generate your FAA compliance report.",
-          ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          id: `sys-${Date.now()}`, role: 'system',
+          content: '✅ Inspection complete. Generate your FAA compliance report.',
+          ts: finalTs,
         }]);
+        speak(completeMsg);
       }
       await refetch();
     } catch {
       setMessages(prev => prev.map(m => m.id === placeholderId
-        ? { ...m, content: "Unable to process reading. Please try again.", streaming: false, ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }
+        ? { ...m, content: 'Unable to process reading. Please try again.', streaming: false, ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
         : m
       ));
     } finally {
       setIsSubmitting(false);
     }
-  }, [input, isSubmitting, sessionId, currentStep, submitStep, refetch]);
+  }, [isSubmitting, sessionId, currentStep, submitStep, refetch, speak]);
+
+  // Keyboard submit — reads from input state
+  const handleSubmit = useCallback(async () => {
+    if (!input.trim()) return;
+    const text = input.trim();
+    setInput('');
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setMessages(prev => [...prev, { id: `w-${Date.now()}`, role: 'worker', content: text, ts }]);
+    await submitText(text);
+  }, [input, submitText]);
+
+  // Voice auto-submit — fires when voiceSubmitText is set
+  useEffect(() => {
+    if (!voiceSubmitText) return;
+    setVoiceSubmitText(null);
+    submitText(voiceSubmitText);
+  }, [voiceSubmitText, submitText]);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
@@ -473,87 +519,70 @@ export default function Inspection() {
             </div>
           )}
 
-          {/* Input bar */}
-          <div className="bg-white border-b border-[oklch(88%_0.01_80)] px-8 py-4 flex-shrink-0">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="label-caps" style={{ color: "oklch(50% 0.012 250)" }}>Voice Command</span>
-              <span className="font-mono text-[10px] bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded px-2 py-0.5" style={{ color: "oklch(50% 0.012 250)" }}>
-                Step {stepNum}
-              </span>
+          {/* Voice-Only PTT Bar */}
+          <div className="bg-white border-b border-[oklch(88%_0.01_80)] px-8 py-5 flex-shrink-0">
+            <div className="flex items-center gap-4">
+              {/* Big PTT mic button */}
               <button
-                onClick={() => { setInput(SAMPLES[currentStep] ?? ""); inputRef.current?.focus(); }}
-                className="font-mono text-[10px] bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded px-2 py-0.5 hover:bg-[oklch(88%_0.01_80)] transition-colors"
-                style={{ color: "oklch(50% 0.012 250)" }}
-              >
-                Use sample ↗
-              </button>
-              {isSupported && (
-                <span className="ml-auto font-mono text-[10px]" style={{ color: "oklch(50% 0.012 250)" }}>
-                  {isTranscribing ? (
-                    <span className="flex items-center gap-1.5 text-[oklch(45%_0.18_250)]">
-                      <div className="w-3 h-3 border-2 border-[oklch(45%_0.18_250/0.3)] border-t-[oklch(45%_0.18_250)] rounded-full animate-spin" />
-                      Transcribing…
-                    </span>
-                  ) : isListening ? (
-                    <span className="flex items-center gap-1.5 text-[oklch(52%_0.24_25)]">
-                      <span className="voice-waveform">
-                        <span /><span /><span /><span /><span />
-                      </span>
-                      Recording… release SPACE
-                    </span>
-                  ) : "Hold SPACE to speak"}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2.5">
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder={`e.g. "${SAMPLES[currentStep] ?? "Enter your reading…"}"`}
-                className={`flex-1 bg-[oklch(97%_0.006_80)] border-[1.5px] border-[oklch(88%_0.01_80)] rounded-[10px] px-4 py-3 text-[14px] font-medium text-[oklch(12%_0.015_250)] placeholder:text-[oklch(68%_0.01_250)] outline-none transition-all ${
-                  isListening ? "voice-listening" : "focus:border-[oklch(12%_0.015_250)] focus:shadow-[0_0_0_3px_oklch(12%_0.015_250/0.07)]"
+                onMouseDown={startListening}
+                onMouseUp={stopListening}
+                onTouchStart={startListening}
+                onTouchEnd={stopListening}
+                disabled={isTranscribing}
+                className={`relative w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all select-none ${
+                  isTranscribing
+                    ? "bg-[oklch(45%_0.18_250)] text-white cursor-wait"
+                    : isListening
+                    ? "bg-[oklch(52%_0.24_25)] text-white shadow-[0_0_0_6px_oklch(52%_0.24_25/0.2)]"
+                    : "bg-[oklch(12%_0.015_250)] text-white hover:opacity-90 active:scale-95"
                 }`}
-              />
-              {isSupported && (
-                <button
-                  onMouseDown={startListening}
-                  onMouseUp={stopListening}
-                  onTouchStart={startListening}
-                  onTouchEnd={stopListening}
-                  className={`w-12 h-12 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-all ${
-                    isTranscribing
-                      ? "bg-[oklch(45%_0.18_250)] text-white"
-                      : isListening
-                      ? "bg-[oklch(52%_0.24_25)] text-white shadow-[0_0_0_4px_oklch(52%_0.24_25/0.2)] animate-pulse"
-                      : "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(50%_0.012_250)] hover:bg-[oklch(88%_0.01_80)]"
-                  }`}
-                  title="Hold to speak (or hold SPACE)"
-                  disabled={isTranscribing}
-                >
-                  {isTranscribing ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : isListening ? <Mic size={18} /> : <MicOff size={18} />}
-                </button>
-              )}
-              <button
-                onClick={handleSubmit}
-                disabled={!input.trim() || isSubmitting}
-                className="flex items-center gap-2 px-5 py-3 bg-[oklch(12%_0.015_250)] text-white rounded-[10px] text-[13px] font-bold hover:opacity-90 disabled:opacity-40 transition-all whitespace-nowrap"
+                title="Hold to speak (or hold SPACE)"
               >
-                {isSubmitting ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <><Send size={14} /> Submit <span className="font-mono text-[10px] bg-white/15 px-1.5 py-0.5 rounded hidden sm:inline">↵</span></>
-                )}
+                {isTranscribing ? (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : isListening ? (
+                  <span className="voice-waveform">
+                    <span /><span /><span /><span /><span />
+                  </span>
+                ) : <Mic size={22} />}
+              </button>
+
+              {/* Status + hint */}
+              <div className="flex-1 min-w-0">
+                <div className="text-[15px] font-bold text-[oklch(12%_0.015_250)] leading-tight">
+                  {isTranscribing ? "Processing your voice…" :
+                   isListening ? "Listening — release SPACE to send" :
+                   isSubmitting ? "AI is responding…" :
+                   "Hold SPACE to speak"}
+                </div>
+                <div className="text-[11px] font-mono mt-0.5" style={{ color: "oklch(60% 0.012 250)" }}>
+                  {isListening ? (
+                    <span className="text-[oklch(52%_0.24_25)] font-semibold">● REC</span>
+                  ) : (
+                    <span>Step {stepNum} · {currentStepData?.category ?? ""} · Voice only mode</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Sample button for demo */}
+              <button
+                onClick={() => {
+                  const sample = SAMPLES[currentStep] ?? "";
+                  if (!sample || isSubmitting) return;
+                  const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  setMessages(prev => [...prev, { id: `w-${Date.now()}`, role: 'worker', content: sample, ts }]);
+                  setVoiceSubmitText(sample);
+                }}
+                disabled={isSubmitting || isListening || isTranscribing}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded-xl text-[12px] font-semibold text-[oklch(30%_0.015_250)] hover:bg-[oklch(88%_0.01_80)] disabled:opacity-40 transition-all whitespace-nowrap flex-shrink-0"
+              >
+                <Send size={12} /> Use sample
               </button>
             </div>
           </div>
 
           {/* AI Thread */}
-          <div ref={threadRef} className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-4">
+          <div ref={threadRef} className="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-5">
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full text-center">
                 <div>
@@ -561,54 +590,53 @@ export default function Inspection() {
                     <Shield size={20} className="text-white" />
                   </div>
                   <p className="text-[13px] font-semibold text-[oklch(12%_0.015_250)]">Ready for Step {stepNum}</p>
-                  <p className="text-[12px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>Type or hold SPACE to speak your reading</p>
+                  <p className="text-[12px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>Hold SPACE to speak your reading</p>
                 </div>
               </div>
             )}
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex gap-3 items-start animate-slide-in-up ${msg.role === "worker" ? "flex-row-reverse" : ""}`}>
-                {msg.role !== "system" && (
-                  <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-[10px] font-black ${
-                    msg.role === "ai" ? "bg-[oklch(12%_0.015_250)] text-white" : "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(30%_0.015_250)]"
-                  }`}>
-                    {msg.role === "ai" ? "AI" : "ME"}
+            {messages.map((msg) => {
+              if (msg.role === "system") {
+                return (
+                  <div key={msg.id} className="w-full py-2.5 px-4 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.25)] rounded-xl text-[12px] font-semibold text-[oklch(55%_0.2_145)] text-center">
+                    {msg.content}
                   </div>
-                )}
-                <div className={`max-w-[520px] ${msg.role === "system" ? "w-full" : ""}`}>
-                  {msg.role === "system" ? (
-                    <div className="w-full py-2.5 px-4 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.25)] rounded-xl text-[12px] font-semibold text-[oklch(55%_0.2_145)] text-center">
-                      {msg.content}
+                );
+              }
+              const isWorker = msg.role === "worker";
+              return (
+                <div key={msg.id} className={`flex items-end gap-2.5 w-full ${isWorker ? "flex-row-reverse" : "flex-row"}`}>
+                  {/* Avatar */}
+                  <div className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center text-[9px] font-black self-start mt-0.5 ${
+                    isWorker
+                      ? "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(30%_0.015_250)]"
+                      : "bg-[oklch(12%_0.015_250)] text-white"
+                  }`}>
+                    {isWorker ? "ME" : "AI"}
+                  </div>
+                  {/* Bubble + timestamp */}
+                  <div className={`flex flex-col gap-1 min-w-0 ${isWorker ? "items-end" : "items-start"}`} style={{ maxWidth: "72%" }}>
+                    <div className={`px-4 py-3 rounded-2xl text-[13px] leading-relaxed break-words ${
+                      isWorker
+                        ? "bg-[oklch(12%_0.015_250)] text-white font-mono text-[12px] rounded-br-sm"
+                        : msg.isAlert
+                        ? "bg-[oklch(97%_0.02_25)] border-[1.5px] border-[oklch(52%_0.24_25/0.35)] text-[oklch(12%_0.015_250)] rounded-bl-sm"
+                        : "bg-white border border-[oklch(88%_0.01_80)] text-[oklch(12%_0.015_250)] rounded-bl-sm"
+                    }`}>
+                      {msg.streaming ? (
+                        <div className="flex gap-1.5 items-center py-1">
+                          <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                        </div>
+                      ) : msg.content}
                     </div>
-                  ) : (
-                    <>
-                      <div className={`px-4 py-3 rounded-xl text-[13px] leading-relaxed ${
-                        msg.role === "worker"
-                          ? "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(30%_0.015_250)] font-mono text-[12px]"
-                          : msg.isAlert
-                          ? "bg-[oklch(97%_0.02_25)] border-[1.5px] border-[oklch(52%_0.24_25/0.25)] text-[oklch(12%_0.015_250)]"
-                          : "bg-white border border-[oklch(88%_0.01_80)] text-[oklch(12%_0.015_250)]"
-                      }`}>
-                        {msg.streaming ? (
-                          <div className="flex gap-1.5 items-center py-1">
-                            <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                            <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                          </div>
-                        ) : (
-                          <>
-                            {msg.content}
-                            {msg.role === "ai" && !msg.streaming && <span className="ai-cursor" />}
-                          </>
-                        )}
-                      </div>
-                      <div className={`text-[10px] font-mono mt-1.5 ${msg.role === "worker" ? "text-right" : ""}`} style={{ color: "oklch(68% 0.01 250)" }}>
-                        {msg.ts}{msg.role === "ai" && " · AI guidance"}{msg.isAlert && " · ⚠ Safety alert"}
-                      </div>
-                    </>
-                  )}
+                    <div className="text-[10px] font-mono px-1" style={{ color: "oklch(68% 0.01 250)" }}>
+                      {msg.ts}{!isWorker && " · AI"}{msg.isAlert && " · ⚠"}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </main>
 

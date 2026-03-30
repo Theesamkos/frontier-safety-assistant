@@ -263,15 +263,7 @@
 .animate-flash         { animation: flash-alert 0.5s ease-in-out 3; }
 .animate-pulse-dot     { animation: pulse-dot 1.5s ease-in-out infinite; }
 
-/* ── AI CURSOR ── */
-.ai-cursor {
-  display: inline-block;
-  width: 2px; height: 1em;
-  background: currentColor;
-  margin-left: 2px;
-  vertical-align: middle;
-  animation: blink 1s step-end infinite;
-}
+/* ai-cursor removed — no blinking cursors in chat */
 
 /* ── GHOST NUMBER ── */
 .ghost-number {
