@@ -479,17 +479,22 @@ Keep answers concise (2-3 sentences), technical, and safety-focused.`;
     speak: publicProcedure
       .input(z.object({
         text: z.string().max(4096),
-        voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).default("nova"),
+        voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).default("onyx"),
       }))
       .mutation(async ({ input }) => {
-        // Strip markdown symbols for cleaner speech
-        const cleanText = input.text
+        // Strip markdown and reduce to 1-2 short, punchy sentences for operational TTS
+        const stripped = input.text
           .replace(/\*\*(.*?)\*\*/g, "$1")
           .replace(/\*(.*?)\*/g, "$1")
           .replace(/`(.*?)`/g, "$1")
           .replace(/#{1,6}\s/g, "")
           .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .replace(/\n+/g, " ")
           .trim();
+
+        // Split into sentences and take only the first 2 for brevity
+        const sentences = stripped.match(/[^.!?]+[.!?]+/g) || [stripped];
+        const cleanText = sentences.slice(0, 2).join(" ").trim();
 
         const baseUrl = process.env.BUILT_IN_FORGE_API_URL?.endsWith("/")
           ? process.env.BUILT_IN_FORGE_API_URL
@@ -505,6 +510,7 @@ Keep answers concise (2-3 sentences), technical, and safety-focused.`;
             model: "tts-1",
             input: cleanText,
             voice: input.voice,
+            speed: 1.1,
             response_format: "mp3",
           }),
         });

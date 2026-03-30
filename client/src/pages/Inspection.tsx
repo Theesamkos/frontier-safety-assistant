@@ -22,7 +22,7 @@ function useTTS() {
     // Truncate to keep responses concise for demo
     const truncated = text.slice(0, 600);
     try {
-      const result = await speakMutation.mutateAsync({ text: truncated, voice: "nova" });
+      const result = await speakMutation.mutateAsync({ text: truncated, voice: "onyx" });
       const binary = atob(result.audioBase64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);

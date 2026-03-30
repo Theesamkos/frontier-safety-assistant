@@ -83,3 +83,9 @@
 - [ ] Replace browser speechSynthesis (robotic) with OpenAI TTS API (tts-1, voice: "nova") via backend
 - [ ] Backend tRPC endpoint: calls OpenAI TTS, returns audio as base64 or streams audio
 - [ ] Frontend: receives audio, plays via HTMLAudioElement — clear, calm, professional voice
+
+## Voice Quality Fix v2 (Critical — Interview Blocker)
+- [ ] Switch TTS voice from "nova" to "onyx" (deep, calm, authoritative male)
+- [ ] Add spoken text pre-processor: strip to 1-2 short sentences, remove all markdown, remove filler
+- [ ] Increase TTS speed to 1.1x for crisp operational delivery
+- [ ] Test voice in browser before delivering
