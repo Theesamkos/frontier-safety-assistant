@@ -78,3 +78,8 @@
 - [ ] Remove blinking cursors from all chat messages (typewriter effect leaving cursor artifact)
 - [ ] Auto-submit after voice transcription — no Enter key needed, send immediately on transcribe success
 - [ ] Add Text-to-Speech (Web Speech API SpeechSynthesis) — AI reads back every response aloud after it arrives
+
+## TTS Voice Quality Fix
+- [ ] Replace browser speechSynthesis (robotic) with OpenAI TTS API (tts-1, voice: "nova") via backend
+- [ ] Backend tRPC endpoint: calls OpenAI TTS, returns audio as base64 or streams audio
+- [ ] Frontend: receives audio, plays via HTMLAudioElement — clear, calm, professional voice

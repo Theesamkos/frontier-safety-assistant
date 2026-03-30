@@ -475,6 +475,52 @@ Keep answers concise (2-3 sentences), technical, and safety-focused.`;
 
         return { text: result.text, language: result.language };
       }),
+
+    speak: publicProcedure
+      .input(z.object({
+        text: z.string().max(4096),
+        voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).default("nova"),
+      }))
+      .mutation(async ({ input }) => {
+        // Strip markdown symbols for cleaner speech
+        const cleanText = input.text
+          .replace(/\*\*(.*?)\*\*/g, "$1")
+          .replace(/\*(.*?)\*/g, "$1")
+          .replace(/`(.*?)`/g, "$1")
+          .replace(/#{1,6}\s/g, "")
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+          .trim();
+
+        const baseUrl = process.env.BUILT_IN_FORGE_API_URL?.endsWith("/")
+          ? process.env.BUILT_IN_FORGE_API_URL
+          : `${process.env.BUILT_IN_FORGE_API_URL}/`;
+
+        const response = await fetch(`${baseUrl}v1/audio/speech`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.BUILT_IN_FORGE_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "tts-1",
+            input: cleanText,
+            voice: input.voice,
+            response_format: "mp3",
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await response.text().catch(() => "");
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `TTS failed: ${response.status} ${err}`,
+          });
+        }
+
+        const audioBuffer = Buffer.from(await response.arrayBuffer());
+        const audioBase64 = audioBuffer.toString("base64");
+        return { audioBase64, mimeType: "audio/mpeg" };
+      }),
   }),
 
   // ── Compliance Report ─────────────────────────────────────────────────────

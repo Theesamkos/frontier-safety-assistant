@@ -7,35 +7,54 @@ import {
   FileText, Home, Clock, Shield, Send
 } from "lucide-react";
 
-// ── TTS Hook ──────────────────────────────────────────────────────────────
+// ── TTS Hook (Neural voice via backend OpenAI TTS) ────────────────────────────────────────
 function useTTS() {
-  const speak = useCallback((text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    // Strip markdown bold/asterisks and clean up for speech
-    const clean = text
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/#{1,6}\s/g, '')
-      .replace(/`([^`]+)`/g, '$1')
-      .slice(0, 500); // keep it concise for demo
-    const utt = new SpeechSynthesisUtterance(clean);
-    utt.rate = 1.05;
-    utt.pitch = 1.0;
-    utt.volume = 1.0;
-    // Prefer a clear English voice
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => v.lang === 'en-US' && v.name.includes('Google')) ||
-      voices.find(v => v.lang === 'en-US') ||
-      voices.find(v => v.lang.startsWith('en'));
-    if (preferred) utt.voice = preferred;
-    window.speechSynthesis.speak(utt);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speakMutation = trpc.voice.speak.useMutation();
+
+  const speak = useCallback(async (text: string) => {
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    // Truncate to keep responses concise for demo
+    const truncated = text.slice(0, 600);
+    try {
+      const result = await speakMutation.mutateAsync({ text: truncated, voice: "nova" });
+      const binary = atob(result.audioBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: result.mimeType });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.play().catch(() => {}); // user gesture may be needed on first load
+    } catch {
+      // Silently fall back to browser TTS if neural TTS fails
+      if (window.speechSynthesis) {
+        const utt = new SpeechSynthesisUtterance(text.slice(0, 300));
+        utt.rate = 1.0;
+        window.speechSynthesis.speak(utt);
+      }
+    }
+  }, [speakMutation]);
+
+  const stop = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    window.speechSynthesis?.cancel();
   }, []);
-  const stop = useCallback(() => window.speechSynthesis?.cancel(), []);
+
   return { speak, stop };
 }
 
-// ── Voice Hook ─────────────────────────────────────────────────────────────
+// ── Voice Hook ────────────────────────────────────────────────────────────────────────────────
 function useVoiceControl(
   onTranscript: (text: string) => void,
   onTranscribing: (v: boolean) => void
