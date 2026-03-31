@@ -22,7 +22,7 @@ function useTTS() {
     // Truncate to keep responses concise for demo
     const truncated = text.slice(0, 600);
     try {
-      const result = await speakMutation.mutateAsync({ text: truncated, voice: "onyx" });
+      const result = await speakMutation.mutateAsync({ text: truncated, voice: "shimmer" });
       const binary = atob(result.audioBase64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -157,7 +157,7 @@ function useVoiceControl(
 }
 
 // ── Sample inputs per step ─────────────────────────────────────────────────
-const SAMPLES: Record<number, string> = {
+const AVIATION_SAMPLES: Record<number, string> = {
   1: "Logbook reviewed, last maintenance 3 days ago, all entries current",
   2: "Airworthiness certificate valid, registration N737DL confirmed",
   3: "Nose section clear, no visible damage, radome intact",
@@ -178,6 +178,29 @@ const SAMPLES: Record<number, string> = {
   18: "Engine 2 oil level 13 QT, within normal range",
   19: "Brake temperature 45 C, wear indicators green",
   20: "Pre-flight inspection complete, aircraft ready for service",
+};
+
+const STEEL_MILL_SAMPLES: Record<number, string> = {
+  1: "LOTO complete, all energy sources isolated, padlocks applied, tags attached",
+  2: "PPE verified, arc flash suit on, face shield down, heat-resistant gloves on",
+  3: "Electrode arms inspected, no visible cracks or mechanical damage",
+  4: "Transformer temperature 72 degrees Celsius, cooling system running normal",
+  5: "Cooling water pressure 78 PSI, all panels showing normal flow",
+  6: "Water-cooled roof and sidewall panels inspected, no leaks detected",
+  7: "Hydraulic pressure 2200 PSI, electrode positioning system nominal",
+  8: "Hydraulic fluid level full, no leaks observed at fittings or hoses",
+  9: "Oxygen lance flow 950 SCFM, pressure at 85 PSI, nominal",
+  10: "Natural gas pressure 45 PSI, carbon injection system pressure 52 PSI",
+  11: "Furnace shell and roof refractory inspected, no hot spots or cracks",
+  12: "Tap hole clear, slag door operational, no blockage",
+  13: "Duct pressure 1.2 inches water column, baghouse fans running",
+  14: "Fume extraction system checked, all dampers open and operational",
+  15: "Scrap charge weight 148 tons, heat number H-2847 logged, composition verified",
+  16: "Scrap bucket integrity confirmed, crane clearance verified, area clear",
+  17: "Power-on sequence verified, electrode positioning confirmed at home position",
+  18: "Target heat temperature 2950 degrees Fahrenheit, alloy additions schedule confirmed",
+  19: "Emergency power-off tested, quench system pressure 95 PSI, ready",
+  20: "Pre-heat checklist complete, heat number H-2847, supervisor sign-off obtained",
 };
 
 // ── Message types ──────────────────────────────────────────────────────────
@@ -226,6 +249,8 @@ export default function Inspection() {
   const failed = steps.filter((s: any) => s.status === "failed").length;
   const total = inspection?.totalSteps ?? 20;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const industry = (state?.aircraft as { industry?: string })?.industry ?? "aviation";
+  const isManufacturing = industry === "manufacturing";
 
   // Timer
   useEffect(() => {
@@ -247,7 +272,9 @@ export default function Inspection() {
       setMessages([{
         id: "welcome",
         role: "ai",
-        content: `Pre-flight inspection initiated for ${a?.manufacturer ?? ""} ${a?.model ?? ""} (${a?.tailNumber ?? ""}). I'll guide you through all ${total} steps. Begin with Step 1: Verify aircraft logbook and maintenance records.`,
+        content: isManufacturing
+          ? `Pre-heat inspection initiated for ${a?.manufacturer ?? ""} ${a?.model ?? ""} (${a?.tailNumber ?? ""}). I'll guide you through all ${total} OSHA-compliant steps. Begin with Step 1: Verify LOTO procedures are complete — all energy sources isolated.`
+          : `Pre-flight inspection initiated for ${a?.manufacturer ?? ""} ${a?.model ?? ""} (${a?.tailNumber ?? ""}). I'll guide you through all ${total} steps. Begin with Step 1: Verify aircraft logbook and maintenance records.`,
         ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       }]);
     }
@@ -552,7 +579,9 @@ export default function Inspection() {
                   isTranscribing
                     ? "bg-[oklch(45%_0.18_250)] text-white cursor-wait"
                     : isListening
-                    ? "bg-[oklch(52%_0.24_25)] text-white shadow-[0_0_0_6px_oklch(52%_0.24_25/0.2)]"
+                    ? isManufacturing
+                      ? "bg-[oklch(62%_0.22_50)] text-white voice-recording-glow-steel"
+                      : "bg-[oklch(52%_0.24_25)] text-white voice-recording-glow"
                     : "bg-[oklch(12%_0.015_250)] text-white hover:opacity-90 active:scale-95"
                 }`}
                 title="Hold to speak (or hold SPACE)"
@@ -560,7 +589,7 @@ export default function Inspection() {
                 {isTranscribing ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : isListening ? (
-                  <span className="voice-waveform">
+                  <span className={`voice-waveform${isManufacturing ? " voice-waveform-steel" : ""}`}>
                     <span /><span /><span /><span /><span />
                   </span>
                 ) : <Mic size={22} />}
@@ -576,9 +605,9 @@ export default function Inspection() {
                 </div>
                 <div className="text-[11px] font-mono mt-0.5" style={{ color: "oklch(60% 0.012 250)" }}>
                   {isListening ? (
-                    <span className="text-[oklch(52%_0.24_25)] font-semibold">● REC</span>
+                    <span className="font-semibold" style={{ color: isManufacturing ? "oklch(62% 0.22 50)" : "oklch(52% 0.24 25)" }}>● REC {isManufacturing ? "| STEEL MILL" : "| AVIATION"}</span>
                   ) : (
-                    <span>Step {stepNum} · {currentStepData?.category ?? ""} · Voice only mode</span>
+                    <span>Step {stepNum} · {currentStepData?.category ?? ""} · {isManufacturing ? "OSHA 1910.147" : "FAA 14 CFR Part 43"}</span>
                   )}
                 </div>
               </div>
@@ -586,6 +615,7 @@ export default function Inspection() {
               {/* Sample button for demo */}
               <button
                 onClick={() => {
+                  const SAMPLES = isManufacturing ? STEEL_MILL_SAMPLES : AVIATION_SAMPLES;
                   const sample = SAMPLES[currentStep] ?? "";
                   if (!sample || isSubmitting) return;
                   const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

@@ -89,3 +89,19 @@
 - [ ] Add spoken text pre-processor: strip to 1-2 short sentences, remove all markdown, remove filler
 - [ ] Increase TTS speed to 1.1x for crisp operational delivery
 - [ ] Test voice in browser before delivering
+
+## v2 Features (Next Build)
+
+- [x] Feature 1: Add "industry" field to schema — support aviation + manufacturing
+- [x] Feature 1: Seed Nucor steel mill equipment (Electric Arc Furnace, ladle, rolling mill) with real specs
+- [x] Feature 1: Update Home page with industry selector (Aviation / Manufacturing)
+- [x] Feature 1: Update AI system prompt to handle steel mill inspection context
+- [x] Feature 1: Nucor-specific safety validation (temperature, amperage, pressure, lockout status)
+- [x] Feature 2: Supervisor Dashboard page (/supervisor) — real-time view of all active inspections
+- [x] Feature 2: Worker cards showing name, equipment, step progress, alert count, elapsed time
+- [x] Feature 2: Live polling or auto-refresh every 10s for real-time feel
+- [x] Feature 3: Visual waveform bars animation during PTT recording (industry-aware: red aviation / orange steel mill)
+- [x] Feature 3: Pulsing mic glow during recording (voice-recording-glow CSS animations)
+- [x] Feature 3: Industry-aware REC indicator with compliance standard label
+- [x] Feature 3: Steel mill sample inputs for all 20 steps
+- [x] GitHub: Three clean separate commits — one per feature
