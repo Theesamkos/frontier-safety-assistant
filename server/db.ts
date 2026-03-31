@@ -207,3 +207,33 @@ export async function getReportByInspectionId(inspectionId: number) {
     .where(eq(complianceReports.inspectionId, inspectionId)).limit(1);
   return result[0] ?? null;
 }
+
+// ── Supervisor Dashboard ──────────────────────────────────────────────────────
+
+export async function getAllActiveInspections() {
+  const db = await getDb();
+  if (!db) return [];
+  // Get all inspections with aircraft info, ordered by most recent
+  const results = await db
+    .select({
+      id: inspections.id,
+      sessionId: inspections.sessionId,
+      aircraftId: inspections.aircraftId,
+      inspectorName: inspections.inspectorName,
+      status: inspections.status,
+      totalSteps: inspections.totalSteps,
+      completedSteps: inspections.completedSteps,
+      safetyChecksPassed: inspections.safetyChecksPassed,
+      safetyChecksFailed: inspections.safetyChecksFailed,
+      startedAt: inspections.startedAt,
+      completedAt: inspections.completedAt,
+      tailNumber: aircraft.tailNumber,
+      model: aircraft.model,
+      manufacturer: aircraft.manufacturer,
+    })
+    .from(inspections)
+    .leftJoin(aircraft, eq(inspections.aircraftId, aircraft.id))
+    .orderBy(desc(inspections.startedAt))
+    .limit(50);
+  return results;
+}

@@ -20,6 +20,7 @@ export const aircraft = mysqlTable("aircraft", {
   tailNumber: varchar("tail_number", { length: 20 }).notNull().unique(),
   model: varchar("model", { length: 100 }).notNull(),
   manufacturer: varchar("manufacturer", { length: 100 }).notNull(),
+  industry: mysqlEnum("industry", ["aviation", "manufacturing"]).default("aviation").notNull(),
   specs: json("specs").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
