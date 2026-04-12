@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import {
@@ -79,6 +79,95 @@ export default function Home() {
     onSuccess: (data) => navigate(`/inspection/${data.sessionId}`),
     onError: () => { toast.error("Failed to start inspection. Please try again."); setIsStarting(false); },
   });
+
+  // ── Quick Demo ──────────────────────────────────────────────────────────────
+  const quickDemoMutation = trpc.inspection.start.useMutation({
+    onSuccess: (data) => navigate(`/inspection/${data.sessionId}?demo=true`),
+    onError: () => { toast.error("Failed to start demo. Please try again."); setIsStarting(false); },
+  });
+
+  const handleQuickDemo = () => {
+    const mfgEquipment = aircraftList?.filter((ac) => (ac as { industry?: string }).industry === "manufacturing");
+    if (!mfgEquipment?.length) { toast.error("Equipment list not loaded yet — please wait a moment."); return; }
+    setIsStarting(true);
+    quickDemoMutation.mutate({ aircraftId: mfgEquipment[0].id, inspectorName: "Demo Inspector" });
+  };
+
+  // ── Mic Test ────────────────────────────────────────────────────────────────
+  const [showMicTest, setShowMicTest] = useState(false);
+  const [micTestState, setMicTestState] = useState<"idle" | "recording" | "processing" | "result" | "error">("idle");
+  const [micTestResult, setMicTestResult] = useState("");
+  const [micCountdown, setMicCountdown] = useState(3);
+  const micChunksRef = useRef<Blob[]>([]);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const transcribeMic = trpc.voice.transcribe.useMutation({
+    onSuccess: (data) => {
+      setMicTestResult(data.text?.trim() || "(no speech detected)");
+      setMicTestState("result");
+    },
+    onError: () => {
+      setMicTestResult("Transcription failed — check your API key and try again.");
+      setMicTestState("error");
+    },
+  });
+
+  const handleMicTest = async () => {
+    if (micTestState === "recording" || micTestState === "processing") return;
+    setMicTestResult("");
+    setMicCountdown(3);
+    setMicTestState("recording");
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      micChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/mp4";
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) micChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        micStreamRef.current?.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(micChunksRef.current, { type: mimeType });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = (reader.result as string).split(",")[1];
+          setMicTestState("processing");
+          transcribeMic.mutate({ audioBase64: base64, mimeType: mimeType.split(";")[0] });
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      recorder.start();
+
+      let remaining = 3;
+      micCountdownRef.current = setInterval(() => {
+        remaining -= 1;
+        setMicCountdown(remaining);
+        if (remaining <= 0) {
+          if (micCountdownRef.current) clearInterval(micCountdownRef.current);
+        }
+      }, 1000);
+
+      setTimeout(() => {
+        if (micCountdownRef.current) clearInterval(micCountdownRef.current);
+        recorder.stop();
+      }, 3000);
+    } catch (err: any) {
+      setMicTestState("error");
+      setMicTestResult(
+        err.name === "NotAllowedError"
+          ? "Microphone permission denied — allow mic access in browser settings."
+          : `Error: ${err.message}`
+      );
+    }
+  };
 
   const handleStart = () => {
     if (!selectedAircraftId) { toast.error(`Please select ${activeIndustry === "aviation" ? "an aircraft" : "equipment"} to inspect.`); return; }
@@ -183,9 +272,19 @@ export default function Home() {
             <span style={{ color: cfg.accentColor }}>Superhuman.</span>
           </h1>
 
-          <p className="text-[16px] leading-relaxed mb-10 max-w-md" style={{ color: "oklch(40% 0.012 250)" }}>
+          <p className="text-[16px] leading-relaxed mb-6 max-w-md" style={{ color: "oklch(40% 0.012 250)" }}>
             {cfg.tagline}
           </p>
+
+          {/* Manufacturing value props — shown for Cover demo context */}
+          {activeIndustry === "manufacturing" && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-10">
+              <span className="text-[13px] font-bold" style={{ color: cfg.accentColor }}>↓ 60% faster inspections</span>
+              <span className="text-[13px] font-bold" style={{ color: "oklch(55% 0.2 145)" }}>✓ Zero compliance errors</span>
+              <span className="text-[13px] font-bold" style={{ color: "oklch(50% 0.012 250)" }}>◎ Hands-free operation</span>
+            </div>
+          )}
+          {activeIndustry === "aviation" && <div className="mb-10" />}
 
           {/* Feature list */}
           <div className="flex flex-col gap-3">
@@ -318,7 +417,7 @@ export default function Home() {
                 {isStarting ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Initializing Inspection…
+                    Initializing…
                   </>
                 ) : (
                   <>
@@ -328,6 +427,99 @@ export default function Home() {
                   </>
                 )}
               </button>
+
+              {/* ── or divider ── */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px bg-[oklch(88%_0.01_80)]" />
+                <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "oklch(68% 0.01 250)" }}>or</span>
+                <div className="flex-1 h-px bg-[oklch(88%_0.01_80)]" />
+              </div>
+
+              {/* ── Quick Demo button ── */}
+              <button
+                onClick={handleQuickDemo}
+                disabled={isStarting || aircraftLoading || !aircraftList?.some((ac) => (ac as { industry?: string }).industry === "manufacturing")}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl text-[13px] font-bold border-[1.5px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  borderColor: "oklch(62% 0.22 50)",
+                  color: "oklch(42% 0.18 50)",
+                  background: "oklch(99% 0.005 50)",
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "oklch(96% 0.015 50)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "oklch(99% 0.005 50)"; }}
+              >
+                <Zap size={14} />
+                Quick Demo
+                <span className="text-[10px] font-medium ml-1" style={{ color: "oklch(60% 0.01 250)" }}>
+                  No voice · 2 min · Manufacturing
+                </span>
+              </button>
+
+              {/* ── Test Microphone toggle ── */}
+              <button
+                onClick={() => { setShowMicTest((v) => !v); setMicTestState("idle"); setMicTestResult(""); }}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-medium transition-colors"
+                style={{ color: showMicTest ? "oklch(12% 0.015 250)" : "oklch(55% 0.012 250)" }}
+              >
+                <Mic size={12} />
+                {showMicTest ? "Hide mic test" : "Test microphone before starting"}
+              </button>
+
+              {/* ── Mic test panel ── */}
+              {showMicTest && (
+                <div className="rounded-xl border border-[oklch(88%_0.01_80)] bg-[oklch(97%_0.006_80)] px-5 py-4 space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: "oklch(50% 0.012 250)" }}>
+                    Microphone Test
+                  </p>
+
+                  <button
+                    onClick={handleMicTest}
+                    disabled={micTestState === "recording" || micTestState === "processing"}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[13px] font-bold text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    style={{ background: micTestState === "recording" ? "oklch(52% 0.24 25)" : "oklch(12% 0.015 250)" }}
+                  >
+                    {micTestState === "recording" ? (
+                      <>
+                        <div className="w-3 h-3 rounded-full bg-white animate-pulse" />
+                        Recording… {micCountdown}s
+                      </>
+                    ) : micTestState === "processing" ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Processing…
+                      </>
+                    ) : (
+                      <>
+                        <Mic size={14} />
+                        {micTestState === "result" || micTestState === "error" ? "Test Again (3 sec)" : "Test Mic (3 sec)"}
+                      </>
+                    )}
+                  </button>
+
+                  {micTestState === "result" && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.25)] rounded-lg">
+                      <CheckCircle2 size={13} className="text-[oklch(55%_0.2_145)] mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[oklch(55%_0.2_145)]">Heard</p>
+                        <p className="text-[12px] font-mono text-[oklch(20%_0.015_250)] mt-0.5">"{micTestResult}"</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {micTestState === "error" && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 bg-[oklch(97%_0.02_25)] border border-[oklch(52%_0.24_25/0.25)] rounded-lg">
+                      <AlertTriangle size={13} className="text-[oklch(52%_0.24_25)] mt-0.5 flex-shrink-0" />
+                      <p className="text-[12px] text-[oklch(30%_0.015_250)]">{micTestResult}</p>
+                    </div>
+                  )}
+
+                  {micTestState === "idle" && (
+                    <p className="text-[11px] text-center" style={{ color: "oklch(60% 0.01 250)" }}>
+                      Speak a sample reading — e.g. "Hydraulic pressure 3050 PSI"
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

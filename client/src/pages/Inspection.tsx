@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { QuickDemoMode } from "@/components/QuickDemoMode";
 import { toast } from "sonner";
 import {
   Mic, MicOff, ChevronRight, AlertTriangle, CheckCircle2,
@@ -226,6 +227,15 @@ export default function Inspection() {
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Demo mode — activated via ?demo=true URL param
+  const [demoMode, setDemoMode] = useState(
+    () => new URLSearchParams(window.location.search).get("demo") === "true"
+  );
+
+  // "Heard: X" visual indicator — shown for 4s after voice transcription
+  const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const lastHeardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { data: state, refetch } = trpc.inspection.getState.useQuery(
     { sessionId: sessionId! },
     { enabled: !!sessionId, refetchInterval: 4000 }
@@ -287,6 +297,12 @@ export default function Inspection() {
   const handleTranscript = useCallback((text: string) => {
     // Directly submit without putting text in the input box
     if (!text.trim() || !sessionId) return;
+
+    // Show "Heard: X" visual indicator for 4 seconds
+    setLastHeard(text.trim());
+    if (lastHeardTimer.current) clearTimeout(lastHeardTimer.current);
+    lastHeardTimer.current = setTimeout(() => setLastHeard(null), 4000);
+
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const workerMsg: ChatMessage = {
       id: `w-${Date.now()}`,
@@ -458,6 +474,20 @@ export default function Inspection() {
         </div>
       </header>
 
+      {/* ══ QUICK DEMO BANNER ══ */}
+      <QuickDemoMode
+        isActive={demoMode}
+        currentStep={currentStep}
+        isSubmitting={isSubmitting}
+        samples={isManufacturing ? STEEL_MILL_SAMPLES : AVIATION_SAMPLES}
+        onSubmit={(text) => {
+          const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          setMessages((prev) => [...prev, { id: `w-${Date.now()}`, role: "worker", content: text, ts }]);
+          submitText(text);
+        }}
+        onStop={() => setDemoMode(false)}
+      />
+
       {/* ══ 3-COLUMN BODY ══ */}
       <div className="flex flex-1 overflow-hidden">
 
@@ -628,6 +658,17 @@ export default function Inspection() {
                 <Send size={12} /> Use sample
               </button>
             </div>
+
+            {/* "Heard: X" indicator — appears for 4s after voice transcription */}
+            {lastHeard && (
+              <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.2)] rounded-xl text-[12px]">
+                <CheckCircle2 size={13} className="text-[oklch(55%_0.2_145)] flex-shrink-0" />
+                <span className="font-semibold text-[oklch(55%_0.2_145)] flex-shrink-0">Heard:</span>
+                <span className="font-mono text-[oklch(30%_0.015_250)] truncate">
+                  &ldquo;{lastHeard.slice(0, 90)}{lastHeard.length > 90 ? "…" : ""}&rdquo;
+                </span>
+              </div>
+            )}
           </div>
 
           {/* AI Thread */}
