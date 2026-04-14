@@ -4,8 +4,8 @@ import { trpc } from "@/lib/trpc";
 import { QuickDemoMode } from "@/components/QuickDemoMode";
 import { toast } from "sonner";
 import {
-  Mic, MicOff, ChevronRight, AlertTriangle, CheckCircle2,
-  FileText, Home, Clock, Shield, Send
+  Mic, ChevronRight, AlertTriangle, CheckCircle2,
+  FileText, Home, Shield, Send, Keyboard
 } from "lucide-react";
 
 // ── TTS Hook (Neural voice via backend OpenAI TTS) ────────────────────────────────────────
@@ -226,6 +226,7 @@ export default function Inspection() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showTextInput, setShowTextInput] = useState(false);
 
   // Demo mode — activated via ?demo=true URL param
   const [demoMode, setDemoMode] = useState(
@@ -352,10 +353,11 @@ export default function Inspection() {
 
       if (result.nextStepNumber) setCurrentStep(result.nextStepNumber);
       if (result.isComplete) {
-        const completeMsg = 'Inspection complete. All steps finished. Generate your FAA compliance report now.';
+        const reportLabel = isManufacturing ? 'OSHA compliance report' : 'FAA compliance report';
+        const completeMsg = `Inspection complete. All steps finished. Generate your ${reportLabel} now.`;
         setMessages(prev => [...prev, {
           id: `sys-${Date.now()}`, role: 'system',
-          content: '✅ Inspection complete. Generate your FAA compliance report.',
+          content: `✅ Inspection complete. Generate your ${reportLabel}.`,
           ts: finalTs,
         }]);
         speak(completeMsg);
@@ -404,54 +406,54 @@ export default function Inspection() {
 
   if (!state) {
     return (
-      <div className="h-screen flex items-center justify-center" style={{ background: "oklch(97% 0.006 80)", fontFamily: "'Bricolage Grotesque', sans-serif" }}>
+      <div className="h-screen flex items-center justify-center" style={{ background: "oklch(8% 0.005 60)", fontFamily: "'Inter', system-ui, sans-serif" }}>
         <div className="text-center">
-          <div className="w-10 h-10 border-2 border-[oklch(12%_0.015_250)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-sm font-mono" style={{ color: "oklch(50% 0.012 250)" }}>Loading inspection…</p>
+          <div className="w-10 h-10 border-2 border-[oklch(85%_0.06_75)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-sm font-mono" style={{ color: "oklch(50% 0.008 70)" }}>Loading inspection…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "oklch(97% 0.006 80)", fontFamily: "'Bricolage Grotesque', 'Inter', sans-serif" }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "oklch(8% 0.005 60)", fontFamily: "'Inter', system-ui, sans-serif" }}>
 
       {/* ══ TOP BAR ══ */}
-      <header className="flex items-stretch h-[52px] bg-white border-b border-[oklch(88%_0.01_80)] flex-shrink-0">
+      <header className="flex items-stretch h-[52px] bg-[oklch(14%_0.005_60)] border-b border-[oklch(16%_0.006_60)] flex-shrink-0">
         {/* Brand */}
-        <div className="flex items-center gap-2.5 px-5 border-r border-[oklch(88%_0.01_80)]">
-          <div className="w-7 h-7 bg-[oklch(12%_0.015_250)] rounded-md flex items-center justify-center">
-            <span className="text-white text-[10px] font-black">SF</span>
+        <div className="flex items-center gap-2.5 px-5 border-r border-[oklch(16%_0.006_60)]">
+          <div className="w-7 h-7 bg-[oklch(85%_0.06_75)] rounded-lg flex items-center justify-center">
+            <span className="text-[oklch(8%_0.005_60)] text-[10px] font-bold">SF</span>
           </div>
-          <span className="text-[13px] font-black tracking-tight text-[oklch(12%_0.015_250)] hidden sm:block">SafetyFirst</span>
+          <span className="text-[13px] font-medium tracking-wide text-[oklch(95%_0.005_80)] hidden sm:block">Frontier</span>
         </div>
 
         {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 px-4 border-r border-[oklch(88%_0.01_80)] text-[12px]" style={{ color: "oklch(50% 0.012 250)" }}>
-          <button onClick={() => navigate("/")} className="hover:text-[oklch(12%_0.015_250)] transition-colors flex items-center gap-1">
+        <div className="flex items-center gap-1.5 px-4 border-r border-[oklch(16%_0.006_60)] text-[12px]" style={{ color: "oklch(45% 0.008 70)" }}>
+          <button onClick={() => navigate("/")} className="hover:text-[oklch(95%_0.005_80)] transition-colors flex items-center gap-1">
             <Home size={11} /> Home
           </button>
           <ChevronRight size={11} />
-          <span className="font-mono">{state.aircraft?.tailNumber}</span>
+          <span className="font-mono text-[oklch(85%_0.06_75)]">{state.aircraft?.tailNumber}</span>
           <ChevronRight size={11} />
-          <span className="font-semibold text-[oklch(12%_0.015_250)]">Pre-Flight</span>
+          <span className="font-medium text-[oklch(92%_0.005_80)]">Inspection</span>
         </div>
 
         {/* Critical alert */}
         {critical.length > 0 ? (
-          <div className="flex items-center gap-3 px-4 bg-[oklch(52%_0.24_25)] flex-1 animate-slide-down">
-            <span className="inline-flex items-center gap-1 bg-white/20 border border-white/30 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white">
+          <div className="flex items-center gap-3 px-4 bg-[oklch(28%_0.12_25)] flex-1 animate-slide-down">
+            <span className="inline-flex items-center gap-1 bg-[oklch(62%_0.20_25/0.2)] border border-[oklch(62%_0.20_25/0.3)] rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[oklch(62%_0.20_25)]">
               ⚠ Critical
             </span>
-            <span className="text-[13px] font-semibold text-white truncate">{critical[0].parameter}</span>
+            <span className="text-[13px] font-semibold text-[oklch(92%_0.005_80)] truncate">{critical[0].parameter}</span>
             {critical[0].actualValue && (
-              <span className="font-mono text-[11px] text-white/70 hidden md:block">
+              <span className="font-mono text-[11px] text-[oklch(70%_0.005_70)] hidden md:block">
                 {critical[0].actualValue} · Spec: {critical[0].expectedRange}
               </span>
             )}
             <button
               onClick={() => acknowledgeAlert.mutate({ alertId: critical[0].id })}
-              className="ml-auto text-[11px] text-white/70 border border-white/25 rounded px-3 py-1 hover:bg-white/15 transition-colors font-mono whitespace-nowrap"
+              className="ml-auto text-[11px] text-[oklch(70%_0.005_70)] border border-[oklch(45%_0.008_70/0.25)] rounded px-3 py-1 hover:bg-[oklch(14%_0.005_60)] transition-colors font-mono whitespace-nowrap"
             >
               Acknowledge →
             </button>
@@ -459,17 +461,17 @@ export default function Inspection() {
         ) : <div className="flex-1" />}
 
         {/* Right actions */}
-        <div className="flex items-center gap-2 px-4 border-l border-[oklch(88%_0.01_80)]">
-          <span className="font-mono text-[11px] bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded px-2.5 py-1 text-[oklch(50%_0.012_250)]">
-            <span className="text-[oklch(12%_0.015_250)] font-bold">{stepNum}</span> / {String(total).padStart(2, "0")}
+        <div className="flex items-center gap-2 px-4 border-l border-[oklch(16%_0.006_60)]">
+          <span className="font-mono text-[11px] bg-[oklch(18%_0.006_60)] border border-[oklch(22%_0.006_60)] rounded px-2.5 py-1 text-[oklch(50%_0.008_70)]">
+            <span className="text-[oklch(95%_0.005_80)] font-bold">{stepNum}</span> / {String(total).padStart(2, "0")}
           </span>
           <button
             onClick={() => { if (!generateReport.isPending) generateReport.mutate({ sessionId: sessionId! }); }}
             disabled={generateReport.isPending}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-[oklch(52%_0.24_25)] rounded-lg text-[12px] font-bold text-white hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-[oklch(85%_0.06_75)] rounded-lg text-[12px] font-semibold text-[oklch(8%_0.005_60)] hover:opacity-90 disabled:opacity-50 transition-opacity whitespace-nowrap"
           >
             <FileText size={13} />
-            {generateReport.isPending ? "Generating…" : "FAA Report"}
+            {generateReport.isPending ? "Generating…" : isManufacturing ? "OSHA Report" : "FAA Report"}
           </button>
         </div>
       </header>
@@ -478,6 +480,7 @@ export default function Inspection() {
       <QuickDemoMode
         isActive={demoMode}
         currentStep={currentStep}
+        totalSteps={total}
         isSubmitting={isSubmitting}
         samples={isManufacturing ? STEEL_MILL_SAMPLES : AVIATION_SAMPLES}
         onSubmit={(text) => {
@@ -492,16 +495,16 @@ export default function Inspection() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── LEFT: CHECKLIST ── */}
-        <aside className="w-[200px] flex-shrink-0 bg-white border-r border-[oklch(88%_0.01_80)] flex flex-col overflow-hidden">
+        <aside className="w-[220px] flex-shrink-0 bg-[oklch(10%_0.005_60)] border-r border-[oklch(16%_0.006_60)] flex flex-col overflow-hidden">
           {/* Progress */}
-          <div className="px-4 py-4 border-b border-[oklch(88%_0.01_80)]">
-            <p className="label-caps mb-2" style={{ color: "oklch(50% 0.012 250)" }}>Checklist</p>
+          <div className="px-4 py-4 border-b border-[oklch(16%_0.006_60)]">
+            <p className="label-caps mb-2">Checklist</p>
             <div className="flex items-baseline gap-1">
-              <span className="text-[38px] font-black leading-none tracking-tight text-[oklch(12%_0.015_250)]">{completed}</span>
-              <span className="text-[16px] font-medium" style={{ color: "oklch(68% 0.01 250)" }}>/ {total}</span>
+              <span className="text-[38px] font-bold leading-none tracking-tight text-[oklch(95%_0.005_80)]">{completed}</span>
+              <span className="text-[16px] font-medium" style={{ color: "oklch(45% 0.012 70)" }}>/ {total}</span>
             </div>
-            <div className="h-[3px] bg-[oklch(88%_0.01_80)] rounded-full mt-2.5 overflow-hidden">
-              <div className="h-full bg-[oklch(12%_0.015_250)] rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+            <div className="h-[3px] bg-[oklch(16%_0.006_60)] rounded-full mt-2.5 overflow-hidden">
+              <div className="h-full bg-[oklch(85%_0.06_75)] rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
             </div>
           </div>
 
@@ -509,7 +512,7 @@ export default function Inspection() {
           <div className="flex-1 overflow-y-auto">
             {Object.entries(byCategory).map(([cat, catSteps]) => (
               <div key={cat}>
-                <div className="px-4 py-2 text-[9px] font-bold uppercase tracking-[0.12em] bg-white border-b border-[oklch(91%_0.008_80)] sticky top-0" style={{ color: "oklch(68% 0.01 250)" }}>
+                <div className="px-4 py-2 text-[9px] font-medium uppercase tracking-[0.12em] bg-[oklch(14%_0.005_60)] border-b border-[oklch(18%_0.006_60)] sticky top-0" style={{ color: "oklch(45% 0.008 70)" }}>
                   {cat}
                 </div>
                 {catSteps.map((step: any) => {
@@ -519,20 +522,20 @@ export default function Inspection() {
                     <button
                       key={step.id}
                       onClick={() => setCurrentStep(step.stepNumber)}
-                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-left border-b border-[oklch(91%_0.008_80)] transition-colors ${
-                        isActive ? "bg-[oklch(12%_0.015_250)]" : "hover:bg-[oklch(94%_0.008_80)]"
+                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-left border-b border-[oklch(18%_0.006_60)] transition-colors ${
+                        isActive ? "bg-[oklch(85%_0.06_75/0.1)] border-l-2 border-l-[oklch(85%_0.06_75)]" : "hover:bg-[oklch(14%_0.005_60)]"
                       }`}
                     >
                       <div className={`w-4 h-4 rounded-[3px] flex-shrink-0 flex items-center justify-center text-[8px] border ${
-                        step.status === "passed" ? "bg-[oklch(55%_0.2_145)] border-[oklch(55%_0.2_145)] text-white" :
-                        step.status === "failed" ? "bg-[oklch(52%_0.24_25)] border-[oklch(52%_0.24_25)] text-white" :
-                        isActive ? "bg-white border-white" : "border-[oklch(82%_0.012_80)]"
+                        step.status === "passed" ? "bg-[oklch(65%_0.15_155)] border-[oklch(65%_0.15_155)] text-white" :
+                        step.status === "failed" ? "bg-[oklch(62%_0.20_25)] border-[oklch(62%_0.20_25)] text-white" :
+                        isActive ? "bg-[oklch(85%_0.06_75)] border-[oklch(85%_0.06_75)]" : "border-[oklch(25%_0.006_60)]"
                       }`}>
                         {step.status === "passed" && "✓"}
                         {step.status === "failed" && "✗"}
                       </div>
                       <span className={`text-[11px] flex-1 leading-tight ${
-                        isActive ? "text-white font-semibold" : done ? "text-[oklch(50%_0.012_250)]" : "text-[oklch(30%_0.015_250)]"
+                        isActive ? "text-[oklch(85%_0.06_75)] font-semibold" : done ? "text-[oklch(40%_0.008_70)]" : "text-[oklch(70%_0.005_70)]"
                       }`}>
                         {step.stepName}
                       </span>
@@ -545,48 +548,48 @@ export default function Inspection() {
         </aside>
 
         {/* ── CENTER: WORKSPACE ── */}
-        <main className="flex-1 flex flex-col overflow-hidden bg-[oklch(97%_0.006_80)]">
+        <main className="flex-1 flex flex-col overflow-hidden bg-[oklch(9%_0.005_60)]">
 
           {/* Step hero */}
-          <div className="bg-white border-b border-[oklch(88%_0.01_80)] px-8 pt-6 pb-5 flex-shrink-0 relative overflow-hidden">
+          <div className="bg-[oklch(14%_0.005_60)] border-b border-[oklch(16%_0.006_60)] px-10 pt-8 pb-7 flex-shrink-0 relative overflow-hidden">
             <div className="ghost-number">{stepNum}</div>
             <div className="flex items-center gap-2 mb-2 relative z-10">
               <div className={`w-2 h-2 rounded-full ${
-                currentStepData?.status === "in_progress" ? "bg-[oklch(52%_0.24_25)] animate-pulse-dot" : "bg-[oklch(55%_0.2_145)]"
+                currentStepData?.status === "in_progress" ? "bg-[oklch(85%_0.06_75)] animate-pulse-dot" : "bg-[oklch(65%_0.15_155)]"
               }`} />
-              <span className="label-caps text-[oklch(52%_0.24_25)]">
+              <span className="label-caps text-[oklch(85%_0.06_75)]">
                 Step {stepNum} · {currentStepData?.category ?? ""}
               </span>
             </div>
-            <h1 className="display-md text-[oklch(12%_0.015_250)] relative z-10 max-w-lg">
+            <h1 className="display-md text-[oklch(95%_0.005_80)] relative z-10 max-w-lg">
               {currentStepData?.stepName ?? "Loading…"}
             </h1>
           </div>
 
           {/* Spec alert strip */}
           {unacked.length > 0 && (
-            <div className="flex border-b border-[oklch(88%_0.01_80)] flex-shrink-0 overflow-x-auto">
+            <div className="flex border-b border-[oklch(16%_0.006_60)] flex-shrink-0 overflow-x-auto">
               {unacked.slice(0, 3).map((al: any) => (
-                <div key={al.id} className={`flex-1 min-w-[160px] px-5 py-3 border-r border-[oklch(88%_0.01_80)] last:border-r-0 ${
+                <div key={al.id} className={`flex-1 min-w-[160px] px-5 py-3 border-r border-[oklch(16%_0.006_60)] last:border-r-0 ${
                   al.severity === "critical" ? "spec-card-critical" :
                   al.severity === "warning" ? "spec-card-warning" : "spec-card-info"
                 }`}>
                   <div className={`label-caps mb-1 ${
-                    al.severity === "critical" ? "text-[oklch(52%_0.24_25)]" :
-                    al.severity === "warning" ? "text-[oklch(68%_0.17_65)]" : "text-[oklch(55%_0.2_250)]"
+                    al.severity === "critical" ? "text-[oklch(62%_0.20_25)]" :
+                    al.severity === "warning" ? "text-[oklch(85%_0.06_75)]" : "text-[oklch(60%_0.15_250)]"
                   }`}>
                     {al.severity === "critical" ? "⚠ Critical" : al.severity === "warning" ? "⚡ Warning" : "ℹ Info"}
                   </div>
-                  <div className="text-[11px] mb-1" style={{ color: "oklch(50% 0.012 250)" }}>{al.parameter}</div>
+                  <div className="text-[11px] mb-1" style={{ color: "oklch(50% 0.008 70)" }}>{al.parameter}</div>
                   {al.actualValue && (
                     <div className={`font-mono text-[24px] font-bold leading-none ${
-                      al.severity === "critical" ? "text-[oklch(52%_0.24_25)]" : "text-[oklch(68%_0.17_65)]"
+                      al.severity === "critical" ? "text-[oklch(62%_0.20_25)]" : "text-[oklch(85%_0.06_75)]"
                     }`}>
                       {al.actualValue}
                     </div>
                   )}
                   {al.expectedRange && (
-                    <div className="font-mono text-[10px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>
+                    <div className="font-mono text-[10px] mt-1" style={{ color: "oklch(45% 0.008 70)" }}>
                       SPEC {al.expectedRange}
                     </div>
                   )}
@@ -596,7 +599,7 @@ export default function Inspection() {
           )}
 
           {/* Voice-Only PTT Bar */}
-          <div className="bg-white border-b border-[oklch(88%_0.01_80)] px-8 py-5 flex-shrink-0">
+          <div className="bg-[oklch(14%_0.005_60)] border-b border-[oklch(16%_0.006_60)] px-10 py-6 flex-shrink-0">
             <div className="flex items-center gap-4">
               {/* Big PTT mic button */}
               <button
@@ -607,19 +610,17 @@ export default function Inspection() {
                 disabled={isTranscribing}
                 className={`relative w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all select-none ${
                   isTranscribing
-                    ? "bg-[oklch(45%_0.18_250)] text-white cursor-wait"
+                    ? "bg-[oklch(40%_0.10_250)] text-white cursor-wait"
                     : isListening
-                    ? isManufacturing
-                      ? "bg-[oklch(62%_0.22_50)] text-white voice-recording-glow-steel"
-                      : "bg-[oklch(52%_0.24_25)] text-white voice-recording-glow"
-                    : "bg-[oklch(12%_0.015_250)] text-white hover:opacity-90 active:scale-95"
+                    ? "bg-[oklch(85%_0.06_75)] text-[oklch(8%_0.005_60)] voice-recording-glow-steel"
+                    : "bg-[oklch(85%_0.06_75)] text-[oklch(8%_0.005_60)] hover:opacity-90 active:scale-95"
                 }`}
                 title="Hold to speak (or hold SPACE)"
               >
                 {isTranscribing ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : isListening ? (
-                  <span className={`voice-waveform${isManufacturing ? " voice-waveform-steel" : ""}`}>
+                  <span className="voice-waveform voice-waveform-steel">
                     <span /><span /><span /><span /><span />
                   </span>
                 ) : <Mic size={22} />}
@@ -627,20 +628,33 @@ export default function Inspection() {
 
               {/* Status + hint */}
               <div className="flex-1 min-w-0">
-                <div className="text-[15px] font-bold text-[oklch(12%_0.015_250)] leading-tight">
+                <div className="text-[15px] font-semibold text-[oklch(95%_0.005_80)] leading-tight">
                   {isTranscribing ? "Processing your voice…" :
                    isListening ? "Listening — release SPACE to send" :
                    isSubmitting ? "AI is responding…" :
                    "Hold SPACE to speak"}
                 </div>
-                <div className="text-[11px] font-mono mt-0.5" style={{ color: "oklch(60% 0.012 250)" }}>
+                <div className="text-[11px] font-mono mt-0.5" style={{ color: "oklch(45% 0.008 70)" }}>
                   {isListening ? (
-                    <span className="font-semibold" style={{ color: isManufacturing ? "oklch(62% 0.22 50)" : "oklch(52% 0.24 25)" }}>● REC {isManufacturing ? "| STEEL MILL" : "| AVIATION"}</span>
+                    <span className="font-semibold text-[oklch(85%_0.06_75)]">● REC {isManufacturing ? "| STEEL MILL" : "| AVIATION"}</span>
                   ) : (
                     <span>Step {stepNum} · {currentStepData?.category ?? ""} · {isManufacturing ? "OSHA 1910.147" : "FAA 14 CFR Part 43"}</span>
                   )}
                 </div>
               </div>
+
+              {/* Type fallback toggle — keyboard escape hatch when voice isn't an option */}
+              <button
+                onClick={() => { setShowTextInput((v) => !v); setTimeout(() => inputRef.current?.focus(), 50); }}
+                className={`flex items-center gap-1.5 px-3.5 py-2.5 border rounded-xl text-[12px] font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
+                  showTextInput
+                    ? "bg-[oklch(85%_0.06_75/0.12)] border-[oklch(85%_0.06_75/0.35)] text-[oklch(85%_0.06_75)]"
+                    : "bg-[oklch(18%_0.006_60)] border-[oklch(22%_0.006_60)] text-[oklch(70%_0.005_70)] hover:border-[oklch(30%_0.006_60)]"
+                }`}
+                title="Toggle keyboard input"
+              >
+                <Keyboard size={12} /> Type
+              </button>
 
               {/* Sample button for demo */}
               <button
@@ -653,18 +667,42 @@ export default function Inspection() {
                   setVoiceSubmitText(sample);
                 }}
                 disabled={isSubmitting || isListening || isTranscribing}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] rounded-xl text-[12px] font-semibold text-[oklch(30%_0.015_250)] hover:bg-[oklch(88%_0.01_80)] disabled:opacity-40 transition-all whitespace-nowrap flex-shrink-0"
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-[oklch(18%_0.006_60)] border border-[oklch(22%_0.006_60)] rounded-xl text-[12px] font-semibold text-[oklch(70%_0.005_70)] hover:bg-[oklch(18%_0.006_60)] disabled:opacity-40 transition-all whitespace-nowrap flex-shrink-0"
               >
                 <Send size={12} /> Use sample
               </button>
             </div>
 
+            {/* Text input fallback — for accessibility, noisy environments, or mic failure */}
+            {showTextInput && (
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder={`Type reading for Step ${stepNum} and press Enter…`}
+                  disabled={isSubmitting || isListening || isTranscribing}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-[oklch(10%_0.005_60)] border border-[oklch(18%_0.006_60)] text-[13px] font-mono text-[oklch(95%_0.005_80)] placeholder:text-[oklch(30%_0.006_60)] outline-none focus:border-[oklch(85%_0.06_75)] focus:shadow-[0_0_0_3px_oklch(85%_0.06_75/0.08)] transition-all disabled:opacity-50"
+                />
+                <button
+                  onClick={handleSubmit}
+                  disabled={!input.trim() || isSubmitting || isListening || isTranscribing}
+                  className="px-4 py-2.5 rounded-xl text-[12px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 flex items-center gap-1.5"
+                  style={{ background: "oklch(85% 0.06 75)", color: "oklch(8% 0.005 60)" }}
+                >
+                  <Send size={12} /> Send
+                </button>
+              </div>
+            )}
+
             {/* "Heard: X" indicator — appears for 4s after voice transcription */}
             {lastHeard && (
-              <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.2)] rounded-xl text-[12px]">
-                <CheckCircle2 size={13} className="text-[oklch(55%_0.2_145)] flex-shrink-0" />
-                <span className="font-semibold text-[oklch(55%_0.2_145)] flex-shrink-0">Heard:</span>
-                <span className="font-mono text-[oklch(30%_0.015_250)] truncate">
+              <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-[oklch(18%_0.03_155)] border border-[oklch(50%_0.12_155/0.25)] rounded-xl text-[12px]">
+                <CheckCircle2 size={13} className="text-[oklch(65%_0.15_155)] flex-shrink-0" />
+                <span className="font-semibold text-[oklch(65%_0.15_155)] flex-shrink-0">Heard:</span>
+                <span className="font-mono text-[oklch(82%_0.005_70)] truncate">
                   &ldquo;{lastHeard.slice(0, 90)}{lastHeard.length > 90 ? "…" : ""}&rdquo;
                 </span>
               </div>
@@ -676,18 +714,18 @@ export default function Inspection() {
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full text-center">
                 <div>
-                  <div className="w-12 h-12 bg-[oklch(12%_0.015_250)] rounded-xl flex items-center justify-center mx-auto mb-3">
-                    <Shield size={20} className="text-white" />
+                  <div className="w-12 h-12 bg-[oklch(85%_0.06_75/0.12)] border border-[oklch(85%_0.06_75/0.2)] rounded-xl flex items-center justify-center mx-auto mb-3">
+                    <Shield size={20} className="text-[oklch(85%_0.06_75)]" />
                   </div>
-                  <p className="text-[13px] font-semibold text-[oklch(12%_0.015_250)]">Ready for Step {stepNum}</p>
-                  <p className="text-[12px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>Hold SPACE to speak your reading</p>
+                  <p className="text-[13px] font-semibold text-[oklch(95%_0.005_80)]">Ready for Step {stepNum}</p>
+                  <p className="text-[12px] mt-1" style={{ color: "oklch(45% 0.008 70)" }}>Hold SPACE to speak your reading</p>
                 </div>
               </div>
             )}
             {messages.map((msg) => {
               if (msg.role === "system") {
                 return (
-                  <div key={msg.id} className="w-full py-2.5 px-4 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.25)] rounded-xl text-[12px] font-semibold text-[oklch(55%_0.2_145)] text-center">
+                  <div key={msg.id} className="w-full py-2.5 px-4 bg-[oklch(18%_0.03_155)] border border-[oklch(50%_0.12_155/0.25)] rounded-xl text-[12px] font-semibold text-[oklch(65%_0.15_155)] text-center">
                     {msg.content}
                   </div>
                 );
@@ -696,10 +734,10 @@ export default function Inspection() {
               return (
                 <div key={msg.id} className={`flex items-end gap-2.5 w-full ${isWorker ? "flex-row-reverse" : "flex-row"}`}>
                   {/* Avatar */}
-                  <div className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center text-[9px] font-black self-start mt-0.5 ${
+                  <div className={`w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center text-[9px] font-bold self-start mt-0.5 ${
                     isWorker
-                      ? "bg-[oklch(94%_0.008_80)] border border-[oklch(88%_0.01_80)] text-[oklch(30%_0.015_250)]"
-                      : "bg-[oklch(12%_0.015_250)] text-white"
+                      ? "bg-[oklch(85%_0.06_75/0.15)] border border-[oklch(85%_0.06_75/0.25)] text-[oklch(85%_0.06_75)]"
+                      : "bg-[oklch(16%_0.006_60)] text-[oklch(60%_0.005_70)]"
                   }`}>
                     {isWorker ? "ME" : "AI"}
                   </div>
@@ -707,20 +745,20 @@ export default function Inspection() {
                   <div className={`flex flex-col gap-1 min-w-0 ${isWorker ? "items-end" : "items-start"}`} style={{ maxWidth: "72%" }}>
                     <div className={`px-4 py-3 rounded-2xl text-[13px] leading-relaxed break-words ${
                       isWorker
-                        ? "bg-[oklch(12%_0.015_250)] text-white font-mono text-[12px] rounded-br-sm"
+                        ? "bg-[oklch(85%_0.06_75)] text-[oklch(8%_0.005_60)] font-mono text-[12px] rounded-br-sm"
                         : msg.isAlert
-                        ? "bg-[oklch(97%_0.02_25)] border-[1.5px] border-[oklch(52%_0.24_25/0.35)] text-[oklch(12%_0.015_250)] rounded-bl-sm"
-                        : "bg-white border border-[oklch(88%_0.01_80)] text-[oklch(12%_0.015_250)] rounded-bl-sm"
+                        ? "bg-[oklch(18%_0.04_25)] border-[1.5px] border-[oklch(50%_0.15_25/0.3)] text-[oklch(85%_0.005_70)] rounded-bl-sm"
+                        : "bg-[oklch(12%_0.008_60)] border border-[oklch(18%_0.006_60)] text-[oklch(85%_0.005_70)] rounded-bl-sm"
                     }`}>
                       {msg.streaming ? (
                         <div className="flex gap-1.5 items-center py-1">
-                          <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                          <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                          <div className="w-1.5 h-1.5 bg-[oklch(50%_0.012_250)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                          <div className="w-1.5 h-1.5 bg-[oklch(30%_0.006_60)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                          <div className="w-1.5 h-1.5 bg-[oklch(30%_0.006_60)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                          <div className="w-1.5 h-1.5 bg-[oklch(30%_0.006_60)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                       ) : msg.content}
                     </div>
-                    <div className="text-[10px] font-mono px-1" style={{ color: "oklch(68% 0.01 250)" }}>
+                    <div className="text-[10px] font-mono px-1" style={{ color: "oklch(35% 0.006 60)" }}>
                       {msg.ts}{!isWorker && " · AI"}{msg.isAlert && " · ⚠"}
                     </div>
                   </div>
@@ -731,76 +769,81 @@ export default function Inspection() {
         </main>
 
         {/* ── RIGHT PANEL ── */}
-        <aside className="w-[300px] flex-shrink-0 bg-white border-l border-[oklch(88%_0.01_80)] flex flex-col overflow-hidden">
+        <aside className="w-[300px] flex-shrink-0 bg-[oklch(10%_0.005_60)] border-l border-[oklch(16%_0.006_60)] flex flex-col overflow-hidden">
           {/* Aircraft ID */}
-          <div className="px-5 py-4 border-b border-[oklch(88%_0.01_80)] flex-shrink-0">
-            <div className="text-[42px] font-black leading-none tracking-[-0.05em] text-[oklch(12%_0.015_250)]">
+          <div className="px-5 py-4 border-b border-[oklch(16%_0.006_60)] flex-shrink-0">
+            <div className="text-[42px] font-bold leading-none tracking-[-0.05em] text-[oklch(95%_0.005_80)]">
               {state.aircraft?.tailNumber ?? "N/A"}
             </div>
-            <div className="text-[12px] mt-1" style={{ color: "oklch(50% 0.012 250)" }}>
+            <div className="text-[12px] mt-1" style={{ color: "oklch(45% 0.008 70)" }}>
               {state.aircraft?.manufacturer} {state.aircraft?.model}
             </div>
             <div className="grid grid-cols-2 gap-3 mt-4">
-              {[
+              {(isManufacturing ? [
+                { k: "Heat #", v: "H-2847" },
+                { k: "Facility", v: "Charlotte, NC" },
+                { k: "Shift", v: "Day Shift" },
+                { k: "Inspector", v: state.inspection?.inspectorName ?? "—" },
+              ] : [
                 { k: "Flight", v: "DL 2847" },
                 { k: "Route", v: "ATL → ORD" },
                 { k: "ETD", v: "16:45 CDT" },
-                { k: "Inspector", v: state.inspection?.inspectorName ?? "S. MOECKEL" },
-              ].map(({ k, v }) => (
+                { k: "Inspector", v: state.inspection?.inspectorName ?? "—" },
+              ]).map(({ k, v }) => (
                 <div key={k}>
-                  <div className="label-caps mb-0.5" style={{ color: "oklch(68% 0.01 250)" }}>{k}</div>
-                  <div className="font-mono text-[12px] font-semibold text-[oklch(12%_0.015_250)]">{v}</div>
+                  <div className="label-caps mb-0.5">{k}</div>
+                  <div className="font-mono text-[12px] font-semibold text-[oklch(85%_0.005_70)]">{v}</div>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Stats row */}
-          <div className="flex border-b border-[oklch(88%_0.01_80)] flex-shrink-0">
+          <div className="flex border-b border-[oklch(16%_0.006_60)] flex-shrink-0">
             {[
-              { n: `${pct}%`, l: "Done", c: "text-[oklch(68%_0.17_65)]" },
-              { n: passed, l: "Passed", c: "text-[oklch(55%_0.2_145)]" },
-              { n: failed, l: "Alerts", c: "text-[oklch(52%_0.24_25)]" },
-              { n: fmt(elapsed), l: "Time", c: "text-[oklch(12%_0.015_250)]" },
+              { n: `${pct}%`, l: "Done", c: "text-[oklch(85%_0.06_75)]" },
+              { n: passed, l: "Passed", c: "text-[oklch(65%_0.15_155)]" },
+              { n: failed, l: "Alerts", c: "text-[oklch(62%_0.20_25)]" },
+              { n: fmt(elapsed), l: "Time", c: "text-[oklch(95%_0.005_80)]" },
             ].map(({ n, l, c }) => (
-              <div key={l} className="flex-1 py-3 text-center border-r border-[oklch(88%_0.01_80)] last:border-r-0">
-                <div className={`text-[20px] font-black leading-none tracking-tight ${c}`}>{n}</div>
-                <div className="label-caps mt-1" style={{ color: "oklch(68% 0.01 250)" }}>{l}</div>
+              <div key={l} className="flex-1 py-3 text-center border-r border-[oklch(16%_0.006_60)] last:border-r-0">
+                <div className={`text-[20px] font-bold leading-none tracking-tight ${c}`}>{n}</div>
+                <div className="label-caps mt-1">{l}</div>
               </div>
             ))}
           </div>
 
           {/* Alerts */}
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-            <p className="label-caps" style={{ color: "oklch(50% 0.012 250)" }}>Active Alerts</p>
+            <p className="label-caps">Active Alerts</p>
             {unacked.length === 0 ? (
-              <div className="flex items-center gap-2 py-3 px-3 bg-[oklch(96%_0.04_145)] border border-[oklch(55%_0.2_145/0.2)] rounded-xl">
-                <CheckCircle2 size={14} className="text-[oklch(55%_0.2_145)]" />
-                <span className="text-[12px] text-[oklch(55%_0.2_145)] font-semibold">All systems nominal</span>
+              <div className="flex items-center gap-2 py-3 px-3 bg-[oklch(18%_0.03_155)] border border-[oklch(50%_0.12_155/0.25)] rounded-xl">
+                <CheckCircle2 size={14} className="text-[oklch(65%_0.15_155)]" />
+                <span className="text-[12px] text-[oklch(65%_0.15_155)] font-semibold">All systems nominal</span>
               </div>
             ) : (
               unacked.map((al: any) => (
-                <div key={al.id} className="rounded-xl overflow-hidden border border-[oklch(88%_0.01_80)]">
-                  <div className={`px-3.5 py-2.5 flex items-center gap-2 text-[11px] font-bold text-white ${
-                    al.severity === "critical" ? "bg-[oklch(52%_0.24_25)]" :
-                    al.severity === "warning" ? "bg-[oklch(68%_0.17_65)]" : "bg-[oklch(55%_0.2_250)]"
+                <div key={al.id} className="rounded-xl overflow-hidden border border-[oklch(18%_0.006_60)]">
+                  <div className={`px-3.5 py-2.5 flex items-center gap-2 text-[11px] font-semibold ${
+                    al.severity === "critical" ? "bg-[oklch(18%_0.04_25)] text-[oklch(62%_0.20_25)] border-b border-[oklch(50%_0.15_25/0.3)]" :
+                    al.severity === "warning" ? "bg-[oklch(18%_0.03_65)] text-[oklch(85%_0.06_75)] border-b border-[oklch(60%_0.10_65/0.3)]" : "bg-[oklch(18%_0.025_250)] text-[oklch(60%_0.15_250)] border-b border-[oklch(50%_0.15_250/0.3)]"
                   }`}>
                     <AlertTriangle size={12} />
                     {al.severity.toUpperCase()} — {al.parameter}
                   </div>
-                  <div className="px-3.5 py-2.5 bg-white text-[11px] leading-relaxed" style={{ color: "oklch(30% 0.015 250)" }}>
+                  <div className="px-3.5 py-2.5 bg-[oklch(14%_0.005_60)] text-[11px] leading-relaxed" style={{ color: "oklch(70% 0.01 70)" }}>
                     {al.message}
                     {al.actualValue && (
                       <div className={`font-mono text-[12px] font-semibold mt-1.5 ${
-                        al.severity === "critical" ? "text-[oklch(52%_0.24_25)]" : "text-[oklch(68%_0.17_65)]"
+                        al.severity === "critical" ? "text-[oklch(62%_0.20_25)]" : "text-[oklch(85%_0.06_75)]"
                       }`}>
                         Reading: {al.actualValue} · Spec: {al.expectedRange}
                       </div>
                     )}
                     <button
                       onClick={() => acknowledgeAlert.mutate({ alertId: al.id })}
-                      className="mt-2 text-[10px] font-mono underline hover:text-[oklch(12%_0.015_250)] transition-colors"
-                      style={{ color: "oklch(50% 0.012 250)" }}
+                      className="mt-2 text-[10px] font-mono underline hover:text-[oklch(85%_0.06_75)] transition-colors"
+                      style={{ color: "oklch(45% 0.008 70)" }}
                     >
                       Acknowledge
                     </button>
@@ -811,14 +854,14 @@ export default function Inspection() {
           </div>
 
           {/* Predicted next */}
-          <div className="px-4 py-3.5 border-t border-[oklch(88%_0.01_80)] flex-shrink-0">
-            <p className="label-caps mb-3" style={{ color: "oklch(50% 0.012 250)" }}>Up Next</p>
+          <div className="px-4 py-3.5 border-t border-[oklch(16%_0.006_60)] flex-shrink-0">
+            <p className="label-caps mb-3">Up Next</p>
             {steps.slice(
               steps.findIndex((s: any) => s.stepNumber === currentStep) + 1,
               steps.findIndex((s: any) => s.stepNumber === currentStep) + 4
             ).map((step: any, i: number) => (
-              <div key={step.id} className="flex gap-2.5 py-2 border-b border-[oklch(91%_0.008_80)] last:border-b-0 text-[11px]" style={{ color: "oklch(30% 0.015 250)" }}>
-                <span className="font-mono text-[10px] font-semibold w-5 flex-shrink-0 pt-0.5" style={{ color: "oklch(68% 0.01 250)" }}>
+              <div key={step.id} className="flex gap-2.5 py-2 border-b border-[oklch(18%_0.006_60)] last:border-b-0 text-[11px]" style={{ color: "oklch(65% 0.01 70)" }}>
+                <span className="font-mono text-[10px] font-semibold w-5 flex-shrink-0 pt-0.5" style={{ color: "oklch(35% 0.006 60)" }}>
                   {String(currentStep + 1 + i).padStart(2, "0")}
                 </span>
                 <span>{step.stepName}</span>
